@@ -19,14 +19,15 @@ sudo apt-get install curl git python3 python3-dev
 curl -L https://tljh.jupyter.org/bootstrap.py | sudo -E python3 - 
 
 # TODO: modify tljh/user.py to add specific skel folder and groups to new users
-sudo sed -i s/("--create-home")/$1, "--skel /etc/skel-tljh", "--groups gaussian"/ /opt/tljh/??
+sudo find /opt/tljh -name user.py | xargs grep -l 'create-home' | sudo xargs sed -i 's/\(\"--create-home\"\)/\1, \"--skel \/etc\/skel-tljh\", \"--groups gaussian\"/'
 
 ## Configure TLJH via tljh-config
 
 # Enable NativeAuthenticator to create new Linux users
 sudo tljh-config set auth.type nativeauthenticator.NativeAuthenticator
 
-# Make JupyterLab the default interface
+## Will be the default in a future release (after 1.0.0b)
+# Make JupyterLab the default interface 
 sudo tljh-config set user_environment.default_app jupyterlab
 
 # Prompt for admin username for TLJH
@@ -62,10 +63,7 @@ sudo cp /etc/skel /etc/skel-tljh
 
 sudo mkdir -p /srv/shared/{data,submissions}
 
-
-
 sudo ln -s /srv/shared /etc/skel-tljh
-sudo ln -s /srv/data /etc/skel-tljh
 
 ## Install Gaussian16
 
