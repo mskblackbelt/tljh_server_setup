@@ -6,18 +6,18 @@ dependencies:
   - pip
   - conda-forge/label/libint_dev::libint
   - python=3.10
-  - ipykernel
+  # - ipykernel
   - pytest
-  - jupyterlab
+  # - jupyterlab
   - pandas
   - xarray
   - openpyxl
   - tabular
   - seaborn
-  - cclib
-  - psi4=1.8
-  # - py3dmol
-  # - nglview
+  - cclib>=1.8
+  - psi4>=1.8
+  - py3dmol
+  - nglview
 
   - pip:
     - avogadro
