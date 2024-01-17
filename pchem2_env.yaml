@@ -1,28 +1,25 @@
 name: pchem2
 channels:
-  - psi4
   - conda-forge
-  - bioconda
-  - defaults
+  - nodefaults
 dependencies:
-  - python>=3.8
-  # - pip # to root env
-  # - jupyterlab>=3 # to root env
-  # - jupyterlab_server # to root env
-  # - jupyterlab-latex # to root env
-  # - jupyterlab_templates # to root env
-  # - nbgitpuller # to root env
-  # - numpy # to root env
-  # - scipy # to root env
-  # - matplotlib # to root env
+  - pip
+  - conda-forge/label/libint_dev::libint
+  - python=3.10
   - ipykernel
+  - pytest
+  - jupyterlab
   - pandas
-  - seaborn
   - xarray
+  - openpyxl
+  - tabular
+  - seaborn
   - cclib
-  - nmrglue
-  - psi4
+  - psi4=1.8
+  # - py3dmol
+  # - nglview
 
   - pip:
-      - avogadro
-      - openchemistry
+    - avogadro
+    - openchemistry
+    - nmrglue
