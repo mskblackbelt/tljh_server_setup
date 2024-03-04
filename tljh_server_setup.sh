@@ -39,9 +39,10 @@ sudo tljh-config add-item users.admin $users
 
 # TODO: upgrade mamba, pip, conda to latest versions?
 # TODO: check location of mamba binary
-# sudo /opt/tljh/user/bin/mamba upgrade -y mamba conda pip
+sudo /opt/tljh/user/bin/mamba upgrade -y mamba conda pip
 
 # TODO: Install packages in base conda environment (if not implemented during installation)
+sudo /opt/tljh/user/bin/mamba install -y ipykernel
 
 # Install computation conda env (prompt for file path first)
 read -p "Location of environment.yml file: " env_file_loc
@@ -52,10 +53,23 @@ sudo /opt/tljh/user/bin/conda env create -f="$env_file_loc"
 # Configure JupyterLab templates
 sudo /opt/tljh/user/bin/jupyter serverextension enable --py jupyterlab_templates
 
-# TODO: place desired templates in appropriate location
+# TODO: place desired templates in appropriate location 
+# 	/opt/tljh/user/etc/jupyter/notebook_templates
+# TODO: disable or remove templates in default directories
+# To disable, add a file called .jupyterlab_templates_ignore to the folder 
+# containing the unwanted templates.
+# sudo -E touch /opt/tljh/user/lib/python3.*/site-packages/jupyterlab_templates/\
+#  {extension/notebook_templates/jupyterlab_templates,templates/jupyterlab_templates}/\
+#  .jupyterlab_templates_ignore
+
+# TODO: Update and build @openchemistry/jupyterlab extension, 
+# link in to pchem2 environment with `sudo jupyter labextension link .`
+# Clone forked version from https://github.com/mskblackbelt/jupyterlab_cjson
+# `npm install`, `npm run build`, `sudo -E jupyter labextension link .` from 
+# base conda environment.
 
 # TODO: give access to the new python kernel for pchem users
-sudo /opt/tljh/user/bin/python3 -m ipython kernel install --name "pchem2" --display-name "Python (PChem Lab)" --sys-prefix
+sudo /opt/tljh/user/envs/pchem2/bin/python3 -m ipykernel install --name "pchem2" --display-name "Python (PChem Lab)" --prefix=/opt/tljh/user/share/jupyter/kernels
 
 ## Create skeleton user folder for new JupyterHub users
 

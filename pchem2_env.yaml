@@ -8,11 +8,11 @@ dependencies:
   - python=3.10
   # - ipykernel
   - pytest
-  # - jupyterlab
+  - jupyterlab
   - pandas
   - xarray
   - openpyxl
-  - tabular
+  - tabulate
   - seaborn
   - cclib>=1.8
   - psi4>=1.8
