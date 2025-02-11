@@ -19,22 +19,17 @@ sudo apt-get install curl git python3 python3-dev
 curl -L https://tljh.jupyter.org/bootstrap.py | sudo -E python3 - 
 
 # Modify tljh/user.py to add specific skel folder and groups to new users
-sudo find /opt/tljh -name user.py | xargs grep -l 'create-home' | sudo xargs sed -i 's/\(\"--create-home\"\)/\1, \"--skel \/etc\/skel-tljh\", \"--groups gaussian\"/'
+sudo find /opt/tljh -name user.py | xargs grep -l 'create-home' | sudo xargs sed -i 's/\(\"--create-home\"\)/\1, \"--skel\", \"\/etc\/skel-tljh\"/'
 
 ## Configure TLJH via tljh-config
 
 # Enable NativeAuthenticator to create new Linux users
 sudo tljh-config set auth.type nativeauthenticator.NativeAuthenticator
 
-## Will be the default in a future release (after 1.0.0b)
-# Make JupyterLab the default interface 
-sudo tljh-config set user_environment.default_app jupyterlab
-
 # Prompt for admin username for TLJH
 read -p "Enter admin user(s) for TLJH: " users
 # Add administrator user(s)
 sudo tljh-config add-item users.admin $users
-
 
 
 # Upgrade mamba, pip, conda to latest versions?
@@ -53,11 +48,8 @@ sudo /opt/tljh/user/bin/jupyter serverextension enable --py jupyterlab_templates
 # TODO: place desired templates in appropriate location 
 # 	/opt/tljh/user/etc/jupyter/notebook_templates
 # TODO: disable or remove templates in default directories
-# To disable, add a file called .jupyterlab_templates_ignore to the folder 
-# containing the unwanted templates.
-# sudo -E touch /opt/tljh/user/lib/python3.*/site-packages/jupyterlab_templates/\
-#  {extension/notebook_templates/jupyterlab_templates,templates/jupyterlab_templates}/\
-#  .jupyterlab_templates_ignore
+# To disable, add the following line to the Hub jupyter config file (/opt/tljh/user/etc/jupyter/jupyter_config.py)
+# `c.JupyterLabTemplates.include_default = False`
 
 # TODO: Update and build @openchemistry/jupyterlab extension, 
 # link in to pchem2 environment with `sudo jupyter labextension link .`
@@ -79,12 +71,15 @@ sudo ln -s -f /srv/shared /etc/skel-tljh
 
 ## Configure for using Gaussian16
 
-# # Create g16 user group, take ownership of $GAUSS_SCRDIR, $g16root/g16 folders
+# # Create gaussian user group, take ownership of $GAUSS_SCRDIR, $g16root/g16 folders
+# sudo groupadd gaussian
+# mkdir /scratch-data/g16-scratch
+# sudo chown root:gaussian /scratch-data/g16-scratch
 # # Export Gaussian information to skeleton .profile
 # sudo cat << EOF >> /etc/skel-tljh/.profile
 # ## Bash setup commands for g16
 # export g16root="/usr/bin" 
-# export GAUSS_SCRDIR="/scrach-data/g16-scratch"
+# export GAUSS_SCRDIR="/scratch-data/g16-scratch"
 # 
 # source $g16root/g16/bsd/g16.profile
 # EOF
