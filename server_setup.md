@@ -1,38 +1,32 @@
-Todo: Turn this all into a shell/python script
+# Target steps in server setup
 
-## Personal items
+## Basic packages
 
-Install 
+Install
 
-- bat
 - curl
 - git
 - python3, python3-dev
-- rcm
 - texlive
 - zsh
-- zsh-syntax-highlighting
 
 Link
 
-- /usr/bin/batcat /usr/bin/bat
 - /usr/bin/python3 /usr/bin/python
-- /usr/share/zsh-syntax-highlighting /usr/local/share/zsh-syntax-highlighting
 
-## Install Gaussian
+<!-- ## Install Gaussian
 
 Gaussian install: <https://gaussian.com/g16/g16bin_install.pdf>
 
-- Add group for gaussian (`g16`)
+- Add group for gaussian (`gaussian`)
 - Add scratch directory, set group ownership to gaussian group
-- Add relevant lines to `.profile` or `.bash_profile` in `/etc/skel`
+- Add relevant lines to `.profile` or `.bash_profile` in `/etc/skel` -->
 
 ## Install JupyterHub via [The Littlest JupyterHub](https://tljh.jupyter.org/en/latest/install/custom-server.html)
 
 - `curl -L https://tljh.jupyter.org/bootstrap.py | sudo -E python3 - --admin <admin_user_name>`
 - TLJH settings
   - `sudo tljh-config set auth.type nativeauthenticator.NativeAuthenticator`
-  - `sudo tljh-config set user_environment.default_app jupyterlab`
 - Upgrade mamba (`sudo -E mamba upgrade --all`)
 - Create new conda environment for notebook use
   - `sudo -E conda env create -f=/path/to/environment.yml`
@@ -43,27 +37,23 @@ Base environment
 
 - pip
 - jupyterlab>=3.2
-# - ipython>=7.30
 - jupyterlab_server>=2.1
 - jupyterlab-latex>=3.1
 - jupyterlab_templates>=0.3
-# - pygments
 - nbgitpuller
 - jupyterlab-git
-# - ipykernel
 - numpy, scipy, matplotlib
 
 P. Chem. environment (base env plus)
 
-- anaconda 2021.11            ??
-- seaborn, pandas
-- cclib			conda-forge 
-- ipympl			conda-forge     ??
-- nmrglue		bioconda 
-- xarray			conda-forge 
-- avogadro		pypi 
-- openchemistry	pypi 
-- psi4      psi
+- anaconda ??
+- seaborn, xarray
+- cclib (conda-forge)
+- ipympl (conda-forge) ??
+- nmrglue (bioconda)
+- avogadro (pypi)
+- openchemistry (pypi)
+- psi4 (psi)
 
 Jupyter labextensions (inside p. chem. env)
 
@@ -93,46 +83,44 @@ ipython kernel install --name “data-science” --
 - Modify /etc/skel/.profile with g18 commands
 - Link to /srv/shared, /srv/data folders for shared data and submission locations
 - Modify /opt/tljh/user.py and add the following to the `useradd` command
-  - "--skel /etc/skel-tljh" 
+  - "--skel /etc/skel-tljh"
   - "--groups gaussian"
-
 
 The following is unnecessary if users are added to the "gaussian" group
 
 - Add `jupyterhub-users` group to ACL permissions for Gaussian/g16 binary, scratch directory
   - `setfacl -R -m g:jupyterhub-users:rx <directory>`
 
-
 ===============================================================================
 
 ## DMZ Reverse Proxy setup
 
-ICIT has provisioned a VM running RedHat for us. 
+ICIT has provisioned a VM running RedHat for us.
 
 They request we do the following:
 
 > Mateusz,
-> 
-> Our gateway server in the DMZ will be handling the initial traffic requests and will be the initial HTTPS component of the routing.  The gateway is built to communicate with other servers on the DMZ, so we'll be setting up a virtual server in the DMZ for you.  That server will be managed by you and you'll need to install and configure a load balancer/rev. proxy (e.g. nginx/traefik/apache) to accept traffic from the gateway and proxy on to your lab system.
-> 
-> The communication on the DMZ should be encrypted, so you'll need to generate a self-signed cert to install on whatever reverse proxy you intend to use.  The communication between your DMZ virtual server and the lab machine should also be encrypted, so you'll need a self-signed cert or a Let's Encrypt cert on the lab machine and configure Traefik to use it.
-> 
+>
+> Our gateway server in the DMZ will be handling the initial traffic requests and will be the initial HTTPS component of the routing. The gateway is built to communicate with other servers on the DMZ, so we'll be setting up a virtual server in the DMZ for you. That server will be managed by you and you'll need to install and configure a load balancer/rev. proxy (e.g. nginx/traefik/apache) to accept traffic from the gateway and proxy on to your lab system.
+>
+> The communication on the DMZ should be encrypted, so you'll need to generate a self-signed cert to install on whatever reverse proxy you intend to use. The communication between your DMZ virtual server and the lab machine should also be encrypted, so you'll need a self-signed cert or a Let's Encrypt cert on the lab machine and configure Traefik to use it.
+>
 > For the public address, we need a hostname to apply to this service (somehostname.hunter.cuny.edu) - do you have something in mind?
-> 
-> Also, the communication between the DMZ virtual server and your lab machine is normally blocked and will need to be enabled.  What we'll need to know is what port you need to connect to on the lab machine.  If you configure Traefik with the SSL cert by following the TLJH guide, then that would be 443.  But if you change it to something else, we'll need to know that.  Just confirm when you have decided and the traffic can be enabled between the two systems.
-> 
+>
+> Also, the communication between the DMZ virtual server and your lab machine is normally blocked and will need to be enabled. What we'll need to know is what port you need to connect to on the lab machine. If you configure Traefik with the SSL cert by following the TLJH guide, then that would be 443. But if you change it to something else, we'll need to know that. Just confirm when you have decided and the traffic can be enabled between the two systems.
+>
 > We'll let you know as soon as the virtual server is ready for you, along with the credentials to access it.
-> 
+>
 > Thank you,
 > Jacob Radford
 
-The (seemingly) easiest guides use `nginx`. Using <https://www.redhat.com/sysadmin/setting-reverse-proxies-nginx> to get going. 
+The (seemingly) easiest guides use `nginx`. Using <https://www.redhat.com/sysadmin/setting-reverse-proxies-nginx> to get going.
 
 - Installed nginx using `dnf install nginx`
 - Start nginx at startup with `sudo systemctl enable --now nginx`
-	- Able to check availability with `curl localhost`
-- *May* need to modify with SELinux permissions, as nginx only has access to ports 80 and 443 (HTTP, HTTPS)
-	- SELinux blocks nginx from looking at cert file, blocks access to TCP socket 443
+  - Able to check availability with `curl localhost`
+- _May_ need to modify with SELinux permissions, as nginx only has access to ports 80 and 443 (HTTP, HTTPS)
+  - SELinux blocks nginx from looking at cert file, blocks access to TCP socket 443
 
 SElinux config script:
 
@@ -159,7 +147,7 @@ boolean -m -1 virt_use_nfs
 EOF
 ```
 
-Settings for nginx are located in `/etc/nginx/nginx.conf`. 
+Settings for nginx are located in `/etc/nginx/nginx.conf`.
 
 Contents of `nginx.conf`
 
