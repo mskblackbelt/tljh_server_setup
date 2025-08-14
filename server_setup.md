@@ -14,13 +14,13 @@ Link
 
 - /usr/bin/python3 /usr/bin/python
 
-<!-- ## Install Gaussian
+## Install Gaussian (if desired)
 
 Gaussian install: <https://gaussian.com/g16/g16bin_install.pdf>
 
 - Add group for gaussian (`gaussian`)
 - Add scratch directory, set group ownership to gaussian group
-- Add relevant lines to `.profile` or `.bash_profile` in `/etc/skel` -->
+- Add relevant lines to `.profile` or `.bash_profile` in `/etc/skel`
 
 ## Install JupyterHub via [The Littlest JupyterHub](https://tljh.jupyter.org/en/latest/install/custom-server.html)
 
@@ -36,7 +36,7 @@ Gaussian install: <https://gaussian.com/g16/g16bin_install.pdf>
 Base environment
 
 - pip
-- jupyterlab>=3.2
+- jupyterlab>=4.4
 - jupyterlab_server>=2.1
 - jupyterlab-latex>=3.1
 - jupyterlab_templates>=0.3
@@ -46,10 +46,9 @@ Base environment
 
 P. Chem. environment (base env plus)
 
-- anaconda ??
-- seaborn, xarray
-- cclib (conda-forge)
-- ipympl (conda-forge) ??
+- xarray
+- cclib 
+- ipympl
 - nmrglue (bioconda)
 - avogadro (pypi)
 - openchemistry (pypi)
@@ -74,7 +73,7 @@ Place the desired templates into a folder scanned by JupyterLab (check via `jupy
 Kernels should be manually added to Jupyter as follows:
 
 ```bash
-ipython kernel install --name “data-science” --
+ipython kernel install --name “<kernel-name>” --
 ```
 
 ### Skeleton user profile
@@ -99,8 +98,6 @@ ICIT has provisioned a VM running RedHat for us.
 
 They request we do the following:
 
-> Mateusz,
->
 > Our gateway server in the DMZ will be handling the initial traffic requests and will be the initial HTTPS component of the routing. The gateway is built to communicate with other servers on the DMZ, so we'll be setting up a virtual server in the DMZ for you. That server will be managed by you and you'll need to install and configure a load balancer/rev. proxy (e.g. nginx/traefik/apache) to accept traffic from the gateway and proxy on to your lab system.
 >
 > The communication on the DMZ should be encrypted, so you'll need to generate a self-signed cert to install on whatever reverse proxy you intend to use. The communication between your DMZ virtual server and the lab machine should also be encrypted, so you'll need a self-signed cert or a Let's Encrypt cert on the lab machine and configure Traefik to use it.
@@ -112,7 +109,6 @@ They request we do the following:
 > We'll let you know as soon as the virtual server is ready for you, along with the credentials to access it.
 >
 > Thank you,
-> Jacob Radford
 
 The (seemingly) easiest guides use `nginx`. Using <https://www.redhat.com/sysadmin/setting-reverse-proxies-nginx> to get going.
 
@@ -180,8 +176,8 @@ log_format wscombined '$remote_addr - $remote_user [$time_local] '
                 #access_log /var/log/nginx/access_log combined;
 
                 location /{
-                        proxy_pass https://146.95.158.49:443/;
-                        proxy_set_header        Host                    "sugarcube.hunter.cuny.edu";
+                        proxy_pass https://<target-machine-ip>:443/;
+                        proxy_set_header        Host                    "<target-host-name>.hunter.cuny.edu";
                         proxy_redirect          default;
                         proxy_http_version 1.1;
                         proxy_set_header Upgrade $http_upgrade;
@@ -192,10 +188,6 @@ log_format wscombined '$remote_addr - $remote_user [$time_local] '
                         proxy_set_header Sec-WebSocket-Version $http_sec_websocket_version;
                         proxy_buffering off;
                         } # end location
-
-                # location /webmo {
-                #       proxy_pass https://146.95.158.49:8443/;
-                # } # end location
         } # end server
 } # end http
 ```
@@ -241,55 +233,3 @@ Check the following pages for info on setting up JupyterHub with a reverse proxy
 - <https://jupyterhub.readthedocs.io/en/stable/reference/config-proxy.html>
 - <https://github.com/jupyterhub/the-littlest-jupyterhub/issues/272>
 - <https://flaviocopes.com/nginx-reverse-proxy/>
-
-## WebMO setup
-
-Install WebMO and TLJH according to instructions. Modify Apache and TLJH as follows:
-
-### Set Apache to listen on 8080
-
-Change ports.conf
-
-- Line 5: `Listen 80` -> `Listen 8080`
-- Line 8, Line 12: `Listen 443` -> `Listen 8080`
-
-### Set Traefik to listen on 443
-
-`sudo tljh-config set http.port 8080`
-`sudo tljh-config set https.port 443`
-
-- Set Traefik to forward traffic for http://webmo.hcpchemlab.org to http://127.0.0.1:8080
-- Content of `/opt/tljh/state/rules/webmo_rules.toml`:
-
-```toml
-[frontends]
-[frontends.default]
-priority = 1
-
-[frontends.jupyterhub]
-backend = "jupyterhub"
-passHostHeader = true
-priority = 90
-[frontends.jupyterhub.routes.rule1]
-rule = "Host: jupyter.hcpchemlab.org"
-
-[frontends.webmo]
-backend = "webmo"
-passHostHeader = true
-priority = 100
-[frontends.webmo.routes.rule1]
-rule = "Host: webmo.hcpchemlab.org"
-
-[backends]
-[backends.jupyterhub]
-[backends.jupyterhub.servers.server1]
-url = "http://127.0.0.1:15001"
-
-[backends.webmo]
-[backends.webmo.servers.server1]
-url = "http://127.0.0.1:8080"
-```
-
-#### Alternate option
-
-Look into using [jupyter-server-proxy](https://jupyter-server-proxy.readthedocs.io/en/latest/), might just need to define a port and go, ignore all of the Traefik configurations.
