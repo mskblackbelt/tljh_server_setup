@@ -1,0 +1,6 @@
+.DS_Store
+
+# Python/Marimo/Jupyter temp files
+__pycache__/
+__marimo__/
+*.ipynb_checkpoints
