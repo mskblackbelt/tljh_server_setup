@@ -184,7 +184,7 @@ From your own admin account (not root), in the repo folder:
 bash scripts/tljh_server_setup.sh
 ```
 
-It asks for the TLJH admin username(s), the path to the Gaussian files (blank skips Gaussian), and whether to build GROMACS, shows a summary, and asks to continue. At the end it prints notes (next steps, storage, admin commands), also saved in `/var/log/tljh_server_setup/latest.txt`.
+It asks for the TLJH admin username(s), a hub password for each admin (typed without echo; blank skips that admin), the path to the Gaussian files (blank skips Gaussian), and whether to build GROMACS, shows a summary, and asks to continue. At the end it prints notes (next steps, storage, admin commands), also saved in `/var/log/tljh_server_setup/latest.txt`.
 
 | Step | What it does |
 | --- | --- |
@@ -210,7 +210,7 @@ It asks for the TLJH admin username(s), the path to the Gaussian files (blank sk
 
 ### After it finishes
 
-1. Sign up as each admin immediately (`/hub/signup`).
+1. Log in as each admin whose password was set during setup; sign up immediately (`/hub/signup`) as any admin that was skipped.
 2. Work through the [Testing](#testing) checklist below.
 
 ### Where things are installed
@@ -245,7 +245,7 @@ Run any of them with `--help` for details.
 ## Users, limits and groups
 
 - **Accounts:** people sign up at `/hub/signup` and an admin approves them at `/hub/authorize` (NativeAuthenticator). Admins are approved automatically. Each hub user `name` gets a Linux account `jupyter-name`, created at first login.
-- **Admin sign-up:** admin usernames are approved automatically when they sign up, so whoever signs up first under an admin name becomes that admin. Sign up as each admin right after setup, before the hub is reachable from outside.
+- **Admin passwords:** the setup asks for a hub password for each admin (at least 8 characters, not a common password) and stores it as NativeAuthenticator's own approved record (a bcrypt hash; the password itself is never written to disk or put on a command line). Those admins log in at `/hub/login` straight away. An admin skipped there must sign up at `/hub/signup` right after setup, before the hub is reachable from outside: admin usernames are approved automatically, so whoever signs up first under one becomes that admin. Change a password at `/hub/change-password`, or re-run the setup and enter a new one.
 - **Scheduled jobs:** `cron` and `at` jobs run outside users' Jupyter servers (and so outside their limits and GPU restriction), so only accounts listed in `/etc/cron.allow` and `/etc/at.allow` may use them: root and the admin who ran the setup script. Add other admins by hand, one username per line.
 - **Idle shutdown:** a server with no activity for 1 hour is stopped. Running kernels are lost; saved files are not.
 - **Default limits:** 4 CPUs and 8 GB per user's server (`tljh-config set limits.cpu` / `limits.memory`). CPUs are logical CPUs (threads): the machine has 64 on 32 cores. Limits are ceilings, not reservations. Going over the memory limit kills that user's kernel.
@@ -284,7 +284,8 @@ None of this has been run on the new server yet. Work through these after the fi
 ### Accounts, limits and groups
 
 - [ ] Right after installing, `sudo tljh-config show` lists `auth: type: nativeauthenticator.NativeAuthenticator`, and the login page offers "Sign up" (not TLJH's "first use" login).
-- [ ] Sign up at `/hub/signup`, approve at `/hub/authorize`, log in. Admins are approved automatically.
+- [ ] Each admin whose password was set during setup logs in at `/hub/login` with it.
+- [ ] Sign up a test student at `/hub/signup`, approve at `/hub/authorize`, log in.
 - [ ] *(student)* `crontab -l` in a JupyterLab terminal says the user isn't allowed to use cron (if cron is installed: `which crontab`).
 - [ ] *(student)* `systemctl show jupyter-<name> -p CPUQuotaPerSecUSec -p MemoryMax` shows `CPUQuotaPerSecUSec=4s` and `MemoryMax=8589934592` (8 GB); `echo $OMP_NUM_THREADS` in a terminal prints 4.
 - [ ] Add the test user to `research` on the Admin page, restart their server: limits become 16 CPUs / 32 GB and `OMP_NUM_THREADS` 16.

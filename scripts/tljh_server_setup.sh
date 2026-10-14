@@ -118,6 +118,29 @@ for u in "${ADMIN_USERS[@]}"; do
         || die "'$u' is not a valid Linux username (lowercase letters, digits, _ or -)"
 done
 
+# Hub passwords for the admin accounts (set in step 3), so admins can log in
+# straight away instead of racing to /hub/signup. Typed without echo, kept
+# only in this script's memory, handed to the hub's database through a pipe
+# (never on a command line or in a file), and stored there only as a bcrypt
+# hash. Blank skips an admin (e.g. one whose password is already set; a
+# skipped admin signs up at /hub/signup instead). On a re-run, entering a
+# password resets it.
+ADMIN_MIN_PASSWORD=8
+declare -A ADMIN_PASSWORDS=()
+for u in "${ADMIN_USERS[@]}"; do
+    while true; do
+        IFS= read -r -s -p "Hub password for admin '$u' (blank to skip): " pw1; echo
+        [[ -n "$pw1" ]] || break
+        if (( ${#pw1} < ADMIN_MIN_PASSWORD )); then
+            echo "  Use at least $ADMIN_MIN_PASSWORD characters."; continue
+        fi
+        IFS= read -r -s -p "Type it again: " pw2; echo
+        if [[ "$pw1" == "$pw2" ]]; then ADMIN_PASSWORDS[$u]=$pw1; break; fi
+        echo "  The passwords didn't match; try again."
+    done
+done
+unset pw1 pw2
+
 for entry in "${COURSE_KERNELS[@]}"; do
     [[ -f "$CENV_DIR/${entry%%|*}" ]] || die "missing course environment file: $CENV_DIR/${entry%%|*}"
 done
@@ -170,10 +193,11 @@ if [[ -d "$TEMPLATES_SRC" ]]; then
     done
 fi
 
+PW_SET_FOR="${!ADMIN_PASSWORDS[*]}"
 cat <<EOF
 
 About to install TLJH with:
-  admin(s)       : ${ADMIN_USERS[*]}
+  admin(s)       : ${ADMIN_USERS[*]} (password set during setup: ${PW_SET_FOR:-none})
   course kernels : $(printf '%s; ' "${COURSE_KERNELS[@]}" | sed 's/|/ -> /g; s/; $//')
   base extras    : $BASE_REQS
   templates      : ${TEMPLATE_FOLDERS[*]:-(none found in $TEMPLATES_SRC)}
@@ -382,6 +406,48 @@ curl -fsSL https://tljh.jupyter.org/bootstrap.py \
 sudo tljh-config set auth.type nativeauthenticator.NativeAuthenticator
 sudo tljh-config set auth.NativeAuthenticator.allow_all true
 sudo tljh-config set auth.NativeAuthenticator.check_common_password true
+
+# Admin passwords from the setup questions. Written straight into the hub's
+# database as NativeAuthenticator's own records (bcrypt hash, approved),
+# using NativeAuthenticator's password checks (length, common passwords).
+# The password reaches the hub's Python only through a pipe, NUL-separated.
+# The hub is reloaded right after, so it reads the new records.
+HUB_DB=/opt/tljh/state/jupyterhub.sqlite
+SET_ADMIN_PASSWORD_PY='
+import sys, bcrypt
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from nativeauthenticator import NativeAuthenticator
+from nativeauthenticator.orm import UserInfo
+db_url, min_len = sys.argv[1], int(sys.argv[2])
+user, password = (f.decode() for f in sys.stdin.buffer.read().split(b"\0")[:2])
+db = sessionmaker(bind=create_engine(db_url))()
+auth = NativeAuthenticator(db=db, check_common_password=True, minimum_password_length=min_len)
+if not auth.is_password_strong(password):
+    sys.exit(f"password for {user} rejected: too short or too common")
+hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+info = UserInfo.find(db, user)
+if info is None:
+    db.add(UserInfo(username=user, password=hashed, is_authorized=True))
+    action = "set"
+else:
+    info.password, info.is_authorized = hashed, True
+    action = "reset"
+db.commit()
+print(f"Hub password {action} for admin {user}")
+'
+ADMIN_PASSWORD_OK=()
+for u in "${!ADMIN_PASSWORDS[@]}"; do
+    sudo test -f "$HUB_DB" || { echo "WARNING: $HUB_DB not found; admins must sign up at /hub/signup"; break; }
+    if printf '%s\0%s\0' "$u" "${ADMIN_PASSWORDS[$u]}" \
+            | sudo "/opt/tljh/hub/bin/python" -I -c "$SET_ADMIN_PASSWORD_PY" "sqlite:///$HUB_DB" "$ADMIN_MIN_PASSWORD"; then
+        ADMIN_PASSWORD_OK+=("$u")
+    else
+        echo "WARNING: no hub password set for $u; sign up as $u at /hub/signup instead"
+    fi
+done
+unset ADMIN_PASSWORDS SET_ADMIN_PASSWORD_PY
+
 sudo tljh-config reload hub
 echo "Login method: $(sudo tljh-config show | sed -n 's/^ *type: *//p' | head -1)"
 
@@ -692,10 +758,12 @@ EOT
     cat <<EOT
 
 Next steps:
-  1. Now, before the hub is reachable from outside: open
-     $HUB_URL/hub/signup and sign up as each admin (${ADMIN_USERS[*]}).
-     Admin names are approved automatically, so whoever signs up first
-     under one becomes that admin.
+  1. Admin accounts. With a password set during setup (${ADMIN_PASSWORD_OK[*]:-none}),
+     log in at $HUB_URL/hub/login. Any other admin (${ADMIN_USERS[*]}) must
+     sign up at $HUB_URL/hub/signup NOW, before the hub is reachable from
+     outside: admin names are approved automatically, so whoever signs up
+     first under one becomes that admin. Change a password later at
+     $HUB_URL/hub/change-password (or re-run this script).
   2. Work through the Testing checklist in docs/server_setup.md (kernels,
      scratch, limits and groups, GPU, exports, drop boxes, Gaussian, GROMACS).
   3. Set up HTTPS and the DMZ proxy (see docs/server_setup.md).
