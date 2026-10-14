@@ -1,0 +1,29 @@
+# Computational chemistry course kernel ("Python (CompChem)").
+# Rebuilt from the old server's compchem environment (Oct 2026): the packages
+# that were explicitly requested, plus its three pip packages.
+# Install or update with:
+#   sudo -E tljh-install-kernel -d "Python (CompChem)" compchem_env.yaml
+# gmxapi (GROMACS Python API) is added to this env by tljh-install-gromacs,
+# built against the server's GROMACS, so it isn't listed here. After
+# rebuilding this env with --recreate, re-add it with:
+#   sudo tljh-install-gromacs --gmxapi-only
+name: compchem
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python>=3.13,<3.14   # what the old kernel ran (matmalib needs >=3.12)
+  - pip
+  - ipykernel
+  - numpy
+  - scipy
+  - matplotlib-base      # plotting without the Qt GUI toolkit (not used in Jupyter)
+  - networkx
+  - colormap
+  - colormaps
+  # were pip-installed on the old server; both are on conda-forge
+  - py3dmol
+  - tabulate
+  - pip:
+    # Marianski Lab toolkit (github.com/marianski-lab/matmalib); PyPI only.
+    - matmalib>=0.2.6

@@ -1,0 +1,40 @@
+# Extra packages for the TLJH user environment (/opt/tljh/user), the one that
+# serves JupyterLab to every user. Installed by scripts/tljh_server_setup.sh.
+#
+# This is a pip file on purpose: TLJH installs JupyterLab, notebook and
+# ipywidgets into this environment with pip, so adding conda copies of the
+# same packages would leave duplicate, conflicting installs. Course kernels
+# (e.g. pchem2_env.yaml) are separate conda envs and are unaffected.
+#
+# Apply changes to a running server with:
+#   sudo -EH /opt/tljh/user/bin/python -m pip install -r base_requirements.txt
+
+# Already installed by TLJH; listed so the minimum versions are enforced.
+notebook>=7.2.2,<8
+jupyterlab>=4.6.2,<5
+nbgitpuller>=1.2.1,<2
+jupyter-resource-usage>=1.1.0,<2
+ipywidgets>=8.1.5,<9
+ipykernel>=7.1.0,<8
+
+# Front-end half of widgets (nglview, py3Dmol, ir_visuals_widget). Must live
+# here, in the environment that runs JupyterLab, not in the course kernels.
+jupyterlab_widgets>=3.0.5,<4
+# nglview's 3D viewer: the package carries its JupyterLab extension, so it
+# must be installed here too or viewers in the pchem2 kernel render blank.
+# Keep this range the same as nglview in pchem2_env.yaml so both halves match.
+nglview>=4.0.1,<5
+
+# JupyterLab extensions
+jupyterlab-latex>=4.4.0,<5
+jupyterlab_templates>=0.5.2,<1
+jupyterlab-myst>=2.6,<3
+jupyterlab-git>=0.51,<1          # Git panel in the sidebar
+jupyterlab-spellchecker>=0.8,<1  # spell-checks Markdown cells and text files
+nbdime>=4.0,<5                   # notebook diffs/merges (used by the Git panel)
+
+# PDF export via the HTML view ("WebPDF"), no LaTeX needed. Pulls in
+# Playwright; the setup script also installs the headless Chromium it drives
+# (step 7). If Playwright is upgraded later, re-run that step so the browser
+# version matches.
+nbconvert[webpdf]
