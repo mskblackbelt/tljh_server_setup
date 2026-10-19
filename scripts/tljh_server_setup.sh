@@ -49,6 +49,8 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #  10. Builds each course's conda environment and registers it as a kernel.
 #  11. Optionally installs Gaussian 16 for every hub user (tljh-install-gaussian).
 #  12. Optionally builds GROMACS with GPU support (tljh-install-gromacs).
+#      A failure in step 11 or 12 does not stop the run: it is logged and
+#      listed in the notes at the end.
 #  13. Reloads the hub so every change takes effect.
 #
 # To update just the admin commands or their settings after editing them,
@@ -451,6 +453,39 @@ unset ADMIN_PASSWORDS SET_ADMIN_PASSWORD_PY
 sudo tljh-config reload hub
 echo "Login method: $(sudo tljh-config show | sed -n 's/^ *type: *//p' | head -1)"
 
+# sudo-rs (Ubuntu's default sudo since 25.10) rejects the line TLJH writes to
+# /etc/sudoers.d/jupyterhub-admins, "Defaults exempt_group = jupyterhub-admins",
+# and prints an "unknown setting" error on every sudo call. TLJH added that
+# line so `sudo -E pip install ...` in a hub terminal keeps the PATH that
+# includes /opt/tljh/user/bin (classic sudo exempts that group from
+# secure_path). In sudo-rs, -E is ignored with a warning, but PATH is in the
+# default env_keep list unless secure_path is set, so lifting secure_path
+# for the admins group gives the same result. Other users keep secure_path.
+# TLJH rewrites its file on every install/upgrade, which step 3 does, so this
+# runs every time. Classic sudo is left exactly as TLJH set it up.
+TLJH_SUDOERS=/etc/sudoers.d/jupyterhub-admins
+ADMIN_PATH_SUDOERS=/etc/sudoers.d/jupyterhub-admins-path
+if sudo --version 2>/dev/null | grep -q '^sudo-rs'; then
+    sudoers_tmp=$(mktemp)
+    sudo cat "$TLJH_SUDOERS" | grep -v '^[[:space:]]*Defaults[[:space:]]\+exempt_group' > "$sudoers_tmp" || true
+    grep -q '^%jupyterhub-admins' "$sudoers_tmp" \
+        || die "$TLJH_SUDOERS has no %jupyterhub-admins rule; TLJH's sudoers file has changed, check it by hand"
+    sudo visudo -cqf "$sudoers_tmp" || die "cleaned $TLJH_SUDOERS failed validation"
+    sudo install -m 0440 -o root -g root "$sudoers_tmp" "$TLJH_SUDOERS"
+    cat > "$sudoers_tmp" <<'EOF'
+# Installed by tljh_server_setup.sh (sudo-rs only). Replaces TLJH's
+# "Defaults exempt_group = jupyterhub-admins", which sudo-rs does not support:
+# hub admins keep their own PATH under sudo, so `sudo -E pip install ...`
+# in a hub terminal uses /opt/tljh/user/bin/pip as TLJH's docs intend.
+Defaults:%jupyterhub-admins !secure_path
+EOF
+    sudo visudo -cqf "$sudoers_tmp" || die "generated $ADMIN_PATH_SUDOERS failed validation"
+    sudo install -m 0440 -o root -g root "$sudoers_tmp" "$ADMIN_PATH_SUDOERS"
+    rm -f "$sudoers_tmp"
+    sudo visudo -cq || die "sudoers configuration failed validation after the sudo-rs changes"
+    echo "sudo-rs: removed exempt_group from $TLJH_SUDOERS; admins keep PATH via $ADMIN_PATH_SUDOERS"
+fi
+
 # --- 4. Admin commands -------------------------------------------------------
 # Installed copies live in /usr/local/sbin (the standard place for local
 # admin tools; it is on sudo's search path), owned by root and not writable
@@ -691,6 +726,35 @@ for entry in "${COURSE_KERNELS[@]}"; do
     sudo -E "$TOOLS_DIR/tljh-install-kernel" -d "$label" "$env_file"
 done
 
+# --- Optional steps 11 and 12 must not stop the run ---------------------------------------
+# A failure in Gaussian or GROMACS is recorded, the rest of the setup carries
+# on (step 13 still reloads the hub), and the notes at the end list what
+# failed. Failures go to $FAILURE_LOG as well as the terminal.
+
+NOTES_DIR=/var/log/tljh_server_setup
+RUN_STAMP=$(date +%Y%m%d-%H%M%S)
+FAILURE_LOG="$NOTES_DIR/failures-$RUN_STAMP.log"
+FAILED_STEPS=()
+sudo install -d -m 0755 -o root -g root "$NOTES_DIR"
+
+# optional_step <name> <hint> <command...>
+optional_step() {
+    local name=$1 hint=$2 rc=0
+    shift 2
+    # "|| rc=$?" keeps set -e and the ERR trap from ending the script here.
+    "$@" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        FAILED_STEPS+=("$name (exit status $rc)")
+        {
+            printf '%s  %s FAILED (exit status %s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$name" "$rc"
+            printf '    command: %s\n    hint:    %s\n' "$*" "$hint"
+        } | sudo tee -a "$FAILURE_LOG" >/dev/null
+        printf '\nwarning: %s FAILED (exit status %s); continuing with the remaining steps.\n         Logged in %s\n' \
+            "$name" "$rc" "$FAILURE_LOG" >&2
+    fi
+    return 0
+}
+
 # --- 11. Gaussian 16 (optional) --------------------------------------------------------
 # tljh-install-gaussian installs the binaries in /opt/gaussian/g16 for the
 # jupyterhub-users group (every hub account), creates /scratch/g16, sets the
@@ -700,7 +764,9 @@ done
 
 if [[ -n "$G16_SRC" ]]; then
     step "11/13 Gaussian 16"
-    sudo "$TOOLS_DIR/tljh-install-gaussian" --no-reload "$G16_SRC"
+    optional_step "Gaussian 16" \
+        "the installer's own error is printed above; a failed test job leaves its log in /tmp/g16test.*/" \
+        sudo "$TOOLS_DIR/tljh-install-gaussian" --no-reload "$G16_SRC"
 else
     step "11/13 Gaussian 16 (skipped)"
 fi
@@ -714,7 +780,9 @@ fi
 
 if [[ $BUILD_GROMACS -eq 1 ]]; then
     step "12/13 GROMACS $GMX_VERSION"
-    sudo -E "$TOOLS_DIR/tljh-install-gromacs" --no-reload
+    optional_step "GROMACS $GMX_VERSION" \
+        "the installer's own error is printed above; a failed build or test keeps its folder in /var/tmp/tljh-gromacs-build/" \
+        sudo -E "$TOOLS_DIR/tljh-install-gromacs" --no-reload
 else
     step "12/13 GROMACS (skipped)"
 fi
@@ -730,17 +798,22 @@ sudo tljh-config reload hub
 # latest.txt pointing at the newest), so they're still there after the
 # terminal is closed. The last line printed says where the file is.
 
-NOTES_DIR=/var/log/tljh_server_setup
-NOTES_FILE="$NOTES_DIR/setup-notes-$(date +%Y%m%d-%H%M%S).txt"
+NOTES_FILE="$NOTES_DIR/setup-notes-$RUN_STAMP.txt"
 HUB_URL="http://$(hostname -f 2>/dev/null || hostname)"
 REPO_VERSION=$(git -C "$SCRIPT_DIR/.." describe --always --dirty 2>/dev/null || echo unknown)
 G16_INSTALLED=0; sudo test -x /opt/gaussian/g16/g16 && G16_INSTALLED=1
 GMX_INSTALLED=0; sudo test -x /opt/gromacs/current/bin/gmx && GMX_INSTALLED=1
+# A failed Gaussian install can leave its files in place (the test job runs
+# last), so a recorded failure overrides the file check.
+for f in "${FAILED_STEPS[@]}"; do
+    [[ $f == Gaussian* ]] && G16_INSTALLED=0
+    [[ $f == GROMACS* ]] && GMX_INSTALLED=0
+done
 CLOCK_SYNCED=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)
 
 admin_notes() {
     cat <<EOT
-==== Setup complete ====
+==== Setup $([[ ${#FAILED_STEPS[@]} -eq 0 ]] && echo complete || echo "finished with ${#FAILED_STEPS[@]} FAILED step(s)") ====
 
 Run on $(hostname) at $(date '+%Y-%m-%d %H:%M %Z') by ${USER:-$(id -un)} (repo version $REPO_VERSION).
   admin(s)       : ${ADMIN_USERS[*]}
@@ -748,6 +821,18 @@ Run on $(hostname) at $(date '+%Y-%m-%d %H:%M %Z') by ${USER:-$(id -un)} (repo v
   Gaussian 16    : $([[ $G16_INSTALLED -eq 1 ]] && echo "installed in /opt/gaussian" || echo "not installed")
   GROMACS        : $([[ $GMX_INSTALLED -eq 1 ]] && echo "installed, /opt/gromacs/current -> $(sudo readlink /opt/gromacs/current)" || echo "not installed")
 EOT
+    if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
+        cat <<EOT
+
+!!!! ATTENTION: these optional steps FAILED; everything else was installed !!!!
+$(printf '  - %s\n' "${FAILED_STEPS[@]}")
+Details: $FAILURE_LOG (full output is in the terminal scrollback of this run).
+Fix the cause, then re-run only that installer (see "Admin commands" below):
+  sudo tljh-install-gaussian <files>        sudo -E tljh-install-gromacs
+A failed Gaussian install can leave non-working files in /opt/gaussian/g16;
+a previous install, if there was one, is in /opt/gaussian/g16.previous.
+EOT
+    fi
     if [[ "$CLOCK_SYNCED" != yes ]]; then
         cat <<EOT
 

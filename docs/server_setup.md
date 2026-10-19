@@ -190,7 +190,7 @@ It asks for the TLJH admin username(s), a hub password for each admin (typed wit
 | --- | --- |
 | 1 | Creates or updates the `/srv` and `/scratch` ZFS datasets (section 4) |
 | 2 | System packages: curl, git, python3, acl, full TeX Live |
-| 3 | Installs TLJH with the admin account(s). The login method (sign up, admins approve) is written before the hub first starts, so there's no window where anyone can claim an account |
+| 3 | Installs TLJH with the admin account(s). The login method (sign up, admins approve) is written before the hub first starts, so there's no window where anyone can claim an account. On sudo-rs (Ubuntu's default sudo), also replaces TLJH's `exempt_group` sudoers line, which sudo-rs rejects (see Admin commands) |
 | 4 | Installs the admin commands (below) in `/usr/local/sbin`, GROMACS build settings in `/usr/local/etc/tljh`, and the sudo rule that lets instructors run `tljh-make-dropbox` |
 | 5 | `/etc/skel-tljh` (new users' home template, with a `shared` link) and `/srv/shared/lab_data`, `/srv/shared/submissions` |
 | 6 | Patches TLJH so new home folders are built from `/etc/skel-tljh` (re-run after TLJH upgrades) |
@@ -241,6 +241,8 @@ Run any of them with `--help` for details.
 | `sudo tljh-make-dropbox <folder> <instructor>` | admins; instructors for their own folders | Create or repair a submission drop box |
 | `sudo tljh-install-gaussian <files>` | admins | Install or replace Gaussian 16 |
 | `sudo -E tljh-install-gromacs` | admins | Build or upgrade GROMACS (`--gmxapi-only` re-adds the Python API to the compchem kernel) |
+
+**sudo-rs note.** Ubuntu's default `sudo` is now sudo-rs. It ignores `-E` (printing "preserving the entire environment is not supported, '-E' is ignored") and rejects TLJH's `Defaults exempt_group = jupyterhub-admins` line. Step 3 removes that line and installs `/etc/sudoers.d/jupyterhub-admins-path` (`Defaults:%jupyterhub-admins !secure_path`), so hub admins keep their own `PATH` under sudo and `sudo -E pip install ...` in a hub terminal still uses `/opt/tljh/user/bin/pip`. Other users keep `secure_path`. TLJH rewrites its sudoers file on every install or upgrade, so re-run the setup script after upgrading TLJH. To pass a specific variable through, use `sudo --preserve-env=VAR,...`.
 
 ## Users, limits and groups
 
