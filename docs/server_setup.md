@@ -22,6 +22,34 @@ Where things live:
 - The OS, packages, `/opt` (TLJH and conda environments) live on the SSD. Keep it under about 80% full.
 - Root on ZFS was considered and not chosen. The Server installer has no ZFS option in its menus. ZFS root is only possible through an autoinstall file (`layout: zfs`), the Desktop installer (marked experimental) or a manual install. On a single SSD, ZFS can detect corruption but has no second copy to repair it from, so it gains little over btrfs here.
 - Don't touch the two HDDs during the install. They become the ZFS mirror in step 3.
+- Install the NVIDIA driver (R615 or later for CUDA 13.4; see "Before installing" under Running the setup script), then boot with **IOMMU passthrough** (below). Needed for anything that uses both GPUs together, GROMACS included.
+
+#### IOMMU passthrough for the two GPUs
+
+With the kernel's default IOMMU mode (translated DMA), copies directly between the two RTX 4000 Ada cards arrive corrupted: CUDA still reports peer access as available, there's no error, and the kernel log fills with `AMD-Vi: Event logged [IO_PAGE_FAULT ...]` from both GPUs. NVIDIA states that IOMMU-enabled peer-to-peer copies aren't supported on bare-metal Linux and recommends `iommu=pt` ([forum reply from NVIDIA staff](https://forums.developer.nvidia.com/t/issacsim-4-5-not-responding-and-input-output-memory-management-unit-iommu-warning/346191/6), [Maxine/Triton docs](https://docs.nvidia.com/maxine/triton/1.2.0/Appendices/PCIeMultiGPUSystems.html)). Found in Oct 2026: CUDA's `simpleP2P` sample returned `nan`, and GROMACS's multi-rank tests gave energies ~37% off; both passed after this change. Driver or toolkit updates aren't expected to help.
+
+```bash
+sudo nano /etc/default/grub          # add iommu=pt inside GRUB_CMDLINE_LINUX_DEFAULT="..."
+sudo update-grub && sudo reboot
+cat /proc/cmdline                    # includes iommu=pt
+sudo dmesg | grep -i 'default domain'   # "Passthrough"
+```
+
+Check peer-to-peer with NVIDIA's sample (needs the CUDA toolkit; `tljh-install-gromacs` installs it, or check again after step 12):
+
+```bash
+git clone --depth 1 https://github.com/NVIDIA/cuda-samples.git ~/cuda-samples
+cd ~/cuda-samples/cpp/0_Introduction/simpleP2P && mkdir -p build && cd build
+cmake .. -DCMAKE_CUDA_ARCHITECTURES=89 -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.4/bin/nvcc && make
+./simpleP2P                          # "Test passed!"
+sudo dmesg | grep -c IO_PAGE_FAULT   # 0
+```
+
+Passthrough only stops the IOMMU from checking ordinary device DMA, which matters for VMs with passed-through devices; this server runs none. `tljh-install-gromacs` refuses to build while the GPUs' DMA is translated (`--allow-iommu` overrides it and turns off GROMACS's direct GPU communication instead). Re-check `simpleP2P` after NVIDIA driver upgrades.
+
+#### Driver and toolkit versions
+
+`nvidia-smi`'s "CUDA Version" is the newest CUDA the *driver* supports, not the installed toolkit. A driver older than the toolkit still runs code compiled ahead of time (GROMACS here), but anything that compiles GPU code at run time (PTX JIT: Numba, CuPy, NVRTC) fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION` (error 222). Found Oct 2026: with the R595 driver (CUDA 13.2) and toolkit 13.4, cuda-samples' `dsl`, `simple` and `uvmlite` failed and `ptxjit` was waived; with R615 all 134 sample runs pass. Branches per toolkit are in NVIDIA's [CUDA release notes](https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html) (13.4 → R615, 13.3 → R610, 13.2 → R595); `tljh-install-gromacs` warns when the driver is older than the toolkit. After any driver change, reboot and re-check `simpleP2P` and `ctest` in the GROMACS build folder (or reinstall GROMACS).
 
 ### 2. Time sync (chrony)
 
@@ -170,7 +198,7 @@ Hardware it's tuned for: AMD Threadripper PRO 7975WX (32 cores, 64 threads), 128
 - [ ] **Base system done** (sections 1–3 above): Ubuntu installed, the `tank` pool exists, and `/home` is on it.
 - [ ] **Clock correct** (`timedatectl status`). NTP is waiting on IT (section 2), so set it by hand if needed. Downloads and certificate checks fail when the clock is far off.
 - [ ] **Gaussian 16 (optional):** the Gaussian binary archive (currently the B.01 AVX2 build, `AVX2.zip`) is copied to the server. Note its path; the script asks for it.
-- [ ] **GROMACS (optional):** the NVIDIA driver is installed and `nvidia-smi` works (`sudo ubuntu-drivers install`, then reboot). The script installs the CUDA toolkit itself.
+- [ ] **GROMACS (optional):** the NVIDIA driver is installed, from the branch that matches the CUDA toolkit in `config/gromacs_build.conf` (CUDA 13.4 needs R615: `sudo apt install nvidia-driver-615-open`, then reboot), and `nvidia-smi` shows "CUDA Version: 13.4" or later. Don't use `sudo ubuntu-drivers install` here; it may pick an older branch. Use Ubuntu's `nvidia-driver-*-open` packages (signed modules that follow kernel updates), not NVIDIA's `nvidia-open`/`cuda-drivers` from the CUDA repository; the two conflict. The server must also boot with `iommu=pt` (section 1). The script installs the CUDA toolkit itself.
 - [ ] **Disk space on the SSD:** `df -h /` shows plenty free. TeX Live, the CUDA toolkit, the conda environments and the GROMACS build all go there; 60 GB or more free is a rough estimate, not a measured figure.
 - [ ] **Outbound network:** `curl -I https://<host>` works for tljh.jupyter.org, github.com, pypi.org, conda.anaconda.org and cdn.playwright.dev, and for GROMACS also ftp.gromacs.org, www.fftw.org and developer.download.nvidia.com.
 - [ ] **Hub not reachable from outside yet.** Admin names are approved automatically for whoever signs up first, and the hub serves plain HTTP until the DMZ proxy and HTTPS are set up.
@@ -205,7 +233,7 @@ It asks for the TLJH admin username(s), a hub password for each admin (typed wit
 ### While it runs
 
 - **Run it inside `tmux` or `screen`.** It takes an hour or more, and a dropped SSH connection would kill it partway through (`tmux new -s setup`; reattach with `tmux attach -t setup`).
-- **Consider answering "N" to GROMACS on the first run.** It's the least-tested part (CUDA 13, NVIDIA's repository address, gmxapi), and if any step fails the script stops there, before step 13 reloads the hub and before it prints its notes. Build it afterwards on its own with `sudo -E tljh-install-gromacs`. The same applies to Gaussian (`sudo tljh-install-gaussian <files>`) if you want to be extra careful, although its installer checks itself with a test job.
+- **Consider answering "N" to GROMACS on the first run.** It's the least-tested part (CUDA 13, NVIDIA's repository address, gmxapi), and its build and tests take a while. A failure in step 11 or 12 no longer stops the run: it's logged in `/var/log/tljh_server_setup/failures-<timestamp>.log` and listed at the top of the final notes. Build it afterwards on its own with `sudo -E tljh-install-gromacs`. The same applies to Gaussian (`sudo tljh-install-gaussian <files>`) if you want to be extra careful, although its installer checks itself with a test job.
 - **If something fails,** fix it and re-run the script. It's safe to re-run, but it repeats the long steps, and step 3 also upgrades TLJH.
 
 ### After it finishes
@@ -240,7 +268,7 @@ Run any of them with `--help` for details.
 | `sudo -E tljh-install-kernel [-d "<label>"] <env-file>` | admins | Add or update a course kernel (`-r` rebuilds from scratch, `--remove <name>` deletes) |
 | `sudo tljh-make-dropbox <folder> <instructor>` | admins; instructors for their own folders | Create or repair a submission drop box |
 | `sudo tljh-install-gaussian <files>` | admins | Install or replace Gaussian 16 |
-| `sudo -E tljh-install-gromacs` | admins | Build or upgrade GROMACS (`--gmxapi-only` re-adds the Python API to the compchem kernel) |
+| `sudo -E tljh-install-gromacs` | admins | Build or upgrade GROMACS (`--gmxapi-only` re-adds the Python API to the compchem kernel; `--allow-iommu` builds without IOMMU passthrough, see section 1) |
 
 **sudo-rs note.** Ubuntu's default `sudo` is now sudo-rs. It ignores `-E` (printing "preserving the entire environment is not supported, '-E' is ignored") and rejects TLJH's `Defaults exempt_group = jupyterhub-admins` line. Step 3 removes that line and installs `/etc/sudoers.d/jupyterhub-admins-path` (`Defaults:%jupyterhub-admins !secure_path`), so hub admins keep their own `PATH` under sudo and `sudo -E pip install ...` in a hub terminal still uses `/opt/tljh/user/bin/pip`. Other users keep `secure_path`. TLJH rewrites its sudoers file on every install or upgrade, so re-run the setup script after upgrading TLJH. To pass a specific variable through, use `sudo --preserve-env=VAR,...`.
 
@@ -318,7 +346,8 @@ None of this has been run on the new server yet. Work through these after the fi
 
 ### GROMACS
 
-- [ ] `tljh-install-gromacs` completes, including `make check`. Points not confirmed in advance: building 2026.4 with CUDA 13 (the docs only state CUDA 12.1 or newer), NVIDIA's repository address for Ubuntu 26.04 (inferred from their naming pattern), and `import gmxapi` in the compchem kernel (a "GLIBCXX" error means the env needs `libstdcxx>=15`).
+- [ ] `tljh-install-gromacs` completes, including `make check`. Confirmed Oct 2026: 2026.4 builds with CUDA 13.4 from NVIDIA's ubuntu2604 repository and passes all tests (with `iommu=pt`). Still to confirm: `import gmxapi` in the compchem kernel (a "GLIBCXX" error means the env needs `libstdcxx>=15`).
+- [ ] `tljh-install-gromacs` prints "IOMMU check: 2 GPUs, peer-to-peer not blocked", and `make check` passes the multi-rank tests (`MdrunTestsTwoRanks`, `MdrunMpi2RankPmeTests`, `regressiontests/complex`); `sudo dmesg | grep -c IO_PAGE_FAULT` stays at 0.
 - [ ] `gmx --version` as a test user shows `GPU support: CUDA`.
 - [ ] *(gpu group)* A short GPU run with `gmx mdrun -ntmpi 1 -ntomp $OMP_NUM_THREADS` uses the GPU.
 - [ ] Later, with real workloads: benchmark `GMX_SIMD=AVX_512` against `AVX2_256` (set in `config/gromacs_cache.cmake`).

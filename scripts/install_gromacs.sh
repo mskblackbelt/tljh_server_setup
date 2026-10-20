@@ -19,13 +19,22 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #                      (e.g. after that env was rebuilt).
 #   --skip-tests       Don't run `make check` (unit + regression tests).
 #   --keep-build       Keep the build folder and downloads afterwards.
+#   --allow-iommu      Build even though the IOMMU translates GPU DMA on a
+#                      multi-GPU machine (see below). GROMACS's direct
+#                      GPU-to-GPU communication is then turned off for every
+#                      user (GMX_DISABLE_DIRECT_GPU_COMM=1): correct results,
+#                      slower multi-GPU runs. Prefer booting with iommu=pt.
 #   --no-reload        Don't restart the hub at the end.
 #   --dry-run          Show the settings and the main commands; change nothing.
 #   -h, --help         Show this help.
 #
 # What it does:
 #   1. Checks the NVIDIA driver (must already be installed) and installs the
-#      CUDA toolkit from NVIDIA's apt repository if it's missing.
+#      CUDA toolkit from NVIDIA's apt repository if it's missing. With two or
+#      more GPUs, stops if the IOMMU is in translated mode: NVIDIA doesn't
+#      support peer-to-peer copies through it on bare metal, and on this
+#      server they arrive corrupted (multi-GPU runs give wrong energies with
+#      no error). Fix: boot with iommu=pt (docs/server_setup.md, section 1).
 #   2. Installs build tools (compilers, cmake, hwloc).
 #   3. Downloads GROMACS and its regression tests, checking their MD5 sums.
 #   4. Builds GROMACS, runs its tests, and installs it in
@@ -52,13 +61,14 @@ usage() { sed -n '5,/^$/s/^# \{0,1\}//p' "$0"; }
 die()   { echo "error: $*" >&2; exit 1; }
 info()  { echo "==> $*"; }
 
-DRY_RUN=0 RELOAD=1 TESTS=1 KEEP_BUILD=0 GMXAPI_ONLY=0
+DRY_RUN=0 RELOAD=1 TESTS=1 KEEP_BUILD=0 GMXAPI_ONLY=0 ALLOW_IOMMU=0 DISABLE_DIRECT_GPU_COMM=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -c|--config)   CONFIG=${2:?"--config needs a file"}; shift 2 ;;
         --gmxapi-only) GMXAPI_ONLY=1; shift ;;
         --skip-tests)  TESTS=0; shift ;;
         --keep-build)  KEEP_BUILD=1; shift ;;
+        --allow-iommu) ALLOW_IOMMU=1; shift ;;
         --no-reload)   RELOAD=0; shift ;;
         --dry-run)     DRY_RUN=1; shift ;;
         -h|--help)     usage; exit 0 ;;
@@ -180,7 +190,58 @@ if [[ -n "$drv_cuda" ]]; then
     if [[ "${drv_cuda%%.*}" -lt "${CUDA_VERSION%%.*}" ]]; then
         die "the driver supports CUDA up to $drv_cuda, older than toolkit $CUDA_VERSION; update the NVIDIA driver"
     elif [[ "$(printf '%s\n%s\n' "$drv_cuda" "$CUDA_VERSION" | sort -V | head -1)" != "$CUDA_VERSION" ]]; then
-        echo "warning: driver supports CUDA $drv_cuda, toolkit is $CUDA_VERSION (works via minor-version compatibility; a driver update is better)"
+        # Minor-version compatibility runs code compiled ahead of time (as
+        # this GROMACS build is, for sm_89), but the driver can't JIT-compile
+        # PTX from a newer toolkit: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222).
+        # Seen Oct 2026 with driver R595 (CUDA 13.2) and toolkit 13.4: the
+        # libNVVM samples (dsl, simple, uvmlite) and ptxjit failed until the
+        # R615 driver was installed.
+        cat >&2 <<WARN
+warning: the driver supports CUDA $drv_cuda, older than toolkit $CUDA_VERSION.
+  GROMACS will still build and run (it's compiled ahead of time for these
+  GPUs), but other software that compiles GPU code at run time (PTX JIT,
+  e.g. Numba, CuPy or NVRTC built with CUDA $CUDA_VERSION) fails with
+  CUDA_ERROR_UNSUPPORTED_PTX_VERSION. Install a driver from the branch that
+  matches the toolkit (CUDA 13.4 -> R615, 13.3 -> R610, 13.2 -> R595), e.g.
+    sudo apt install nvidia-driver-615-open   # then reboot
+  and check that nvidia-smi shows "CUDA Version: $CUDA_VERSION" or later.
+WARN
+    fi
+fi
+
+# Multi-GPU peer-to-peer and the IOMMU. With the IOMMU translating DMA
+# (the kernel default on this AMD board), CUDA still reports peer access as
+# available, but GPU-to-GPU copies arrive as garbage and the kernel logs
+# "AMD-Vi: ... IO_PAGE_FAULT" from the GPUs; NVIDIA states IOMMU-enabled
+# P2P is unsupported on bare metal and recommends iommu=pt. Found Oct 2026:
+# CUDA's simpleP2P sample failed verification and GROMACS's multi-rank
+# tests gave energies ~37% off; both passed after booting with iommu=pt.
+# The IOMMU group type of each GPU tells the mode: "identity" =
+# passthrough, "DMA"/"DMA-FQ" = translated, no group = IOMMU off.
+mapfile -t gpu_ids < <(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader)
+if [[ ${#gpu_ids[@]} -ge 2 ]]; then
+    translated=()
+    for id in "${gpu_ids[@]}"; do
+        dev=${id,,}; dev=${dev: -12}          # 00000000:01:00.0 -> 0000:01:00.0
+        grp_type=$(cat "/sys/bus/pci/devices/$dev/iommu_group/type" 2>/dev/null || echo none)
+        if [[ "$grp_type" == DMA* ]]; then translated+=("$dev ($grp_type)"); fi
+    done
+    if [[ ${#translated[@]} -gt 0 ]]; then
+        if [[ $ALLOW_IOMMU -eq 0 ]]; then
+            die "${#gpu_ids[@]} GPUs, and the IOMMU translates their DMA: ${translated[*]}.
+  GPU-to-GPU (peer-to-peer) copies are not supported this way and give
+  wrong results without any error. Boot with IOMMU passthrough:
+    1. add iommu=pt to GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub
+    2. sudo update-grub && sudo reboot
+    3. check: cat /proc/cmdline shows iommu=pt, and CUDA's simpleP2P passes
+  (docs/server_setup.md, section 1). Or re-run with --allow-iommu to build
+  with GROMACS's direct GPU communication turned off for everyone."
+        fi
+        echo "warning: IOMMU translates GPU DMA (${translated[*]}); turning off GROMACS direct GPU communication (GMX_DISABLE_DIRECT_GPU_COMM=1) for the tests and for all users"
+        DISABLE_DIRECT_GPU_COMM=1
+        export GMX_DISABLE_DIRECT_GPU_COMM=1
+    else
+        echo "IOMMU check: ${#gpu_ids[@]} GPUs, peer-to-peer not blocked (passthrough or IOMMU off)"
     fi
 fi
 
@@ -298,6 +359,11 @@ c.Spawner.environment.update({
     "GMXDATA": _gmx + "/share/gromacs",
     "GROMACS_DIR": _gmx,
 })
+$([[ $DISABLE_DIRECT_GPU_COMM -eq 1 ]] && printf '%s\n' \
+'# Installed with --allow-iommu: GPU-to-GPU copies are unreliable with the' \
+'# IOMMU in translated mode, so GROMACS sends that data through the CPU.' \
+'# Remove (and re-run tljh-install-gromacs) after booting with iommu=pt.' \
+'c.Spawner.environment["GMX_DISABLE_DIRECT_GPU_COMM"] = "1"')
 EOF
 chmod 0644 "$HUB_SNIPPET"
 
@@ -308,6 +374,9 @@ cat > "$PROFILE_SNIPPET" <<EOF
 if [ -z "\${GMXBIN:-}" ] && [ -r "$GMX_ROOT/current/bin/GMXRC" ]; then
     . "$GMX_ROOT/current/bin/GMXRC"
 fi
+$([[ $DISABLE_DIRECT_GPU_COMM -eq 1 ]] && printf '%s\n' \
+'# --allow-iommu: GPU-to-GPU copies are unreliable with the IOMMU translating.' \
+'export GMX_DISABLE_DIRECT_GPU_COMM=1')
 EOF
 chmod 0644 "$PROFILE_SNIPPET"
 
