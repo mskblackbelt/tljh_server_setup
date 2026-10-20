@@ -26,6 +26,19 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #                   (default 4). On the hub, resource_groups.py replaces
 #                   both with each server's own limits; these values still
 #                   apply to SSH logins.
+#   --fastmath-cpu NAME
+#                   Set PGI_FASTMATH_CPU, which tells the PGI math library
+#                   inside Gaussian which CPU type to use instead of
+#                   detecting it. G16 before C.01 can't recognise newer AMD
+#                   CPUs (Zen) and stops with "Fastmath dispatch table is
+#                   corrupt". Default "auto": on AMD CPUs, use the value that
+#                   matches the build (haswell for the AVX2 build,
+#                   sandybridge for AVX, nehalem for SSE4.2); on Intel, leave
+#                   it unset. "none" never sets it. Accepted names (from the
+#                   PGI runtime in the binaries): skylake knightslanding
+#                   haswell piledriver bulldozer istanbul shanghai barcelona
+#                   sandybridge nehalem penryn core2. On Zen, avoid
+#                   piledriver/bulldozer (FMA4) and knightslanding (AVX-512ER).
 #   --no-reload     Don't restart the hub at the end (tljh_server_setup.sh
 #                   reloads it itself).
 #   --dry-run       Print the commands without running them.
@@ -44,6 +57,7 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #      leftover scratch files older than 7 days.
 #   5. Sets Gaussian's environment for every user's server (notebooks and
 #      JupyterLab terminals) and for SSH logins.
+#      On AMD CPUs it also sets PGI_FASTMATH_CPU (see --fastmath-cpu).
 #   6. Runs Gaussian's test job 0 as a non-root member of jupyterhub-users
 #      and compares the energy with Gaussian's reference output.
 #
@@ -68,12 +82,13 @@ die()   { echo "error: $*" >&2; exit 1; }
 info()  { echo "==> $*"; }
 run()   { printf '  $'; printf ' %q' "$@"; printf '\n'; if [[ $DRY_RUN -eq 0 ]]; then "$@"; fi; }
 
-DRY_RUN=0 RELOAD=1 SRC=""
+DRY_RUN=0 RELOAD=1 SRC="" FASTMATH_OPT=auto FASTMATH_CPU=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --scratch)   SCRATCH=${2:?"--scratch needs a folder"}; shift 2 ;;
         --mem)       MEM_DEFAULT=${2:?"--mem needs a size, e.g. 6GB"}; shift 2 ;;
         --nproc)     NPROC_DEFAULT=${2:?"--nproc needs a number"}; shift 2 ;;
+        --fastmath-cpu) FASTMATH_OPT=${2:?"--fastmath-cpu needs a CPU name, auto or none"}; shift 2 ;;
         --no-reload) RELOAD=0; shift ;;
         --dry-run)   DRY_RUN=1; shift ;;
         -h|--help)   usage; exit 0 ;;
@@ -91,6 +106,10 @@ done
 [[ "$SCRATCH" == /* && "$SCRATCH" != / ]] || die "--scratch must be an absolute path"
 [[ "$MEM_DEFAULT" =~ ^[0-9]+([KkMmGg][BbWw])?$ ]] || die "--mem looks wrong: $MEM_DEFAULT (e.g. 6GB)"
 [[ "$NPROC_DEFAULT" =~ ^[1-9][0-9]*$ ]] || die "--nproc must be a positive number"
+case "$FASTMATH_OPT" in
+    auto|none|skylake|knightslanding|haswell|piledriver|bulldozer|istanbul|shanghai|barcelona|sandybridge|nehalem|penryn|core2) ;;
+    *) die "--fastmath-cpu: unknown CPU name '$FASTMATH_OPT' (see --help)" ;;
+esac
 getent group "$GROUP" >/dev/null || die "group $GROUP not found; install TLJH first"
 SRC=$(realpath -e -- "$SRC" 2>/dev/null) || die "not found: $SRC"
 
@@ -167,6 +186,29 @@ if [[ $DRY_RUN -eq 0 ]]; then
     esac
     if [[ -n "$need" ]] && ! grep -qw "$need" /proc/cpuinfo; then
         die "this CPU lacks $need, which the $build build requires"
+    fi
+
+    # PGI_FASTMATH_CPU (see --fastmath-cpu). Tested Oct 2026 on the Zen 4
+    # server with the B.01 AVX2 build: haswell and skylake both reproduce
+    # Gaussian's reference energies (tests 0000-0002, 0045, 0135, 0314,
+    # 0315, 0338, 0339) at the same speed; haswell matches the build.
+    case "$FASTMATH_OPT" in
+        none) FASTMATH_CPU="" ;;
+        auto)
+            if grep -qm1 'AuthenticAMD' /proc/cpuinfo; then
+                case "$build" in
+                    haswell)           FASTMATH_CPU=haswell ;;
+                    sandy|sandybridge) FASTMATH_CPU=sandybridge ;;
+                    nehalem)           FASTMATH_CPU=nehalem ;;
+                    *)                 FASTMATH_CPU="" ;;
+                esac
+            fi ;;
+        *) FASTMATH_CPU=$FASTMATH_OPT ;;
+    esac
+    if [[ -n "$FASTMATH_CPU" ]]; then
+        info "PGI_FASTMATH_CPU=$FASTMATH_CPU (math library CPU type; see --fastmath-cpu)"
+    else
+        info "PGI_FASTMATH_CPU not set (the math library detects the CPU itself)"
     fi
 
     # Ownership and permissions: root owns, the group can read and run,
@@ -255,6 +297,7 @@ c.Spawner.environment.update({
     "GAUSS_PDEF": "$NPROC_DEFAULT",
     "PGI_TERM": "trace,abort",
     "_DSM_BARRIER": "SHM",
+$([[ -n "$FASTMATH_CPU" ]] && printf '    # Math library CPU type; needed on AMD Zen (see --fastmath-cpu).\n    "PGI_FASTMATH_CPU": "%s",\n' "$FASTMATH_CPU")
     # The hub's own PATH is what users' servers inherit; append Gaussian.
     "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
             + ":" + _g16 + "/bsd:" + _g16,
@@ -277,6 +320,7 @@ if [ -n "\${BASH_VERSION:-}" ] && [ -z "\${GAUSS_EXEDIR:-}" ] && [ -x "$G16ROOT/
     export GAUSS_SCRDIR="$SCRATCH"
     export GAUSS_MDEF="$MEM_DEFAULT"
     export GAUSS_PDEF="$NPROC_DEFAULT"
+$([[ -n "$FASTMATH_CPU" ]] && printf '    export PGI_FASTMATH_CPU="%s"\n' "$FASTMATH_CPU")
     . "\$g16root/g16/bsd/g16.profile"
 fi
 EOF
@@ -296,6 +340,7 @@ if [[ $DRY_RUN -eq 0 ]]; then
     chown nobody:"$GROUP" "$T"; chmod 0770 "$T"
     if runuser -u nobody -g "$GROUP" -- env -i HOME="$T" \
             g16root="$G16ROOT" GAUSS_SCRDIR="$SCRATCH" \
+            ${FASTMATH_CPU:+PGI_FASTMATH_CPU="$FASTMATH_CPU"} \
             PATH="/usr/bin:/bin" bash -c \
             'cd "$HOME" && . "$g16root/g16/bsd/g16.profile" &&
              timeout 600 g16 < "$g16root/g16/tests/com/test0000.com" > test0000.log 2>&1'
@@ -309,6 +354,9 @@ if [[ $DRY_RUN -eq 0 ]]; then
     else
         echo "error: test job failed; the last lines of its output ($T/test0000.log):" >&2
         tail -20 "$T/test0000.log" >&2 || true
+        if grep -q 'Fastmath dispatch table is corrupt' "$T/test0000.log" 2>/dev/null; then
+            echo "hint: the math library doesn't recognise this CPU; try --fastmath-cpu haswell (AVX2 build) or sandybridge" >&2
+        fi
         exit 1
     fi
 fi
@@ -331,4 +379,5 @@ cat <<EOF
     Jobs without %mem / %nproc use $MEM_DEFAULT and $NPROC_DEFAULT processors
     (on the hub, resource_groups.py replaces these with each server's own
     CPU and memory limits, if it is installed).
+    PGI_FASTMATH_CPU: ${FASTMATH_CPU:-not set}
 EOF

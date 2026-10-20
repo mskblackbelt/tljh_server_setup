@@ -312,7 +312,8 @@ None of this has been run on the new server yet. Work through these after the fi
 
 ### Gaussian 16
 
-- [ ] `tljh-install-gaussian` reports "Test passed" with E(RHF) matching Gaussian's reference (−74.9607232751).
+- [ ] `tljh-install-gaussian` reports "Test passed" with E(RHF) matching Gaussian's reference (−74.9607232751), and on this AMD server reports `PGI_FASTMATH_CPU=haswell` (see docs/gaussian_setup_notes.md).
+- [ ] *(student)* `echo $PGI_FASTMATH_CPU` in a JupyterLab terminal prints `haswell`.
 - [ ] *(student)* A small job from a JupyterLab terminal (`g16 < input.com > output.log`) and from a notebook cell (`!g16 ...`) both end with "Normal termination", with the server's GPU and device access restricted (checks that shared memory still works).
 
 ### GROMACS
