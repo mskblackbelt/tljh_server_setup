@@ -223,7 +223,7 @@ It asks for the TLJH admin username(s), a hub password for each admin (typed wit
 | 5 | `/etc/skel-tljh` (new users' home template, with a `shared` link) and `/srv/shared/lab_data`, `/srv/shared/submissions` |
 | 6 | Patches TLJH so new home folders are built from `/etc/skel-tljh` (re-run after TLJH upgrades) |
 | 7 | Default limits, idle shutdown, `cron`/`at` limited to root and the admin running the script (`/etc/cron.allow`, `/etc/at.allow`), and the hub config files from `config/jupyterhub_config.d` |
-| 8 | JupyterLab extensions and settings (`environments/base_requirements.txt`, `config/jupyter_config.py`), WebPDF browser |
+| 8 | Updates conda, mamba and pip in `/opt/tljh/user` (TLJH's own Miniforge is from 2024), then JupyterLab extensions and settings (`environments/base_requirements.txt`, `config/jupyter_config.py`), WebPDF browser |
 | 9 | Notebook templates (each folder in `templates/`) |
 | 10 | Course kernels (`environments/*.yaml`, listed in `COURSE_KERNELS` at the top of the script) |
 | 11 | Gaussian 16 (optional), via `tljh-install-gaussian` |

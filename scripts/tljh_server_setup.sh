@@ -44,7 +44,8 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #   7. Sets per-user limits and idle shutdown, limits cron/at to admins, and
 #      installs the hub config files in config/jupyterhub_config.d
 #      (per-group CPU/memory/GPU, WebPDF browser path).
-#   8. Adds JupyterLab extensions and settings to the TLJH user environment.
+#   8. Updates conda, mamba and pip in the TLJH user environment, then adds
+#      JupyterLab extensions and settings to it.
 #   9. Installs notebook templates (each folder in templates/).
 #  10. Builds each course's conda environment and registers it as a kernel.
 #  11. Optionally installs Gaussian 16 for every hub user (tljh-install-gaussian).
@@ -614,7 +615,23 @@ echo "Installed $(printf '%s ' "${HUB_CONFIG_FILES[@]##*/}")into $HUB_CONFIG_DIR
 # same packages on top leaves duplicate, conflicting installs.
 
 step "8/13 JupyterLab extensions and settings (base environment)"
+# TLJH installs a fixed Miniforge (24.7.1: conda 24.7, mamba 1.x) and later
+# only upgrades conda/mamba/pip that are below very old minimums, so a new
+# server starts with an outdated conda ("A newer version of conda exists").
+# Update them here, before any course environment is built. Tested Oct 2026:
+# conda 24.7.1 -> 26.9.3, mamba -> 2.9.0; Python stayed 3.12, the hub,
+# extensions, tljh-install-kernel (create/update/pip/remove), gmxapi and a
+# TLJH re-run all still worked. Python's minor version is checked because a
+# change there would break every package pip installed in this env.
+# conda doctor's "base environment is not marked as frozen" is expected:
+# freezing it would block the installs this script and TLJH make here.
+py_before=$("$TLJH_USER/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+sudo "$TLJH_USER/bin/mamba" update -p "$TLJH_USER" -c conda-forge -y conda mamba
+py_after=$("$TLJH_USER/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+[[ "$py_before" == "$py_after" ]] \
+    || die "updating conda/mamba changed Python in $TLJH_USER from $py_before to $py_after; JupyterLab's pip-installed packages need reinstalling (re-run this script) and should be checked"
 sudo -EH "$TLJH_USER/bin/python" -m pip install --upgrade pip
+echo "conda $("$TLJH_USER/bin/conda" --version | awk '{print $2}'), mamba $("$TLJH_USER/bin/mamba" --version | head -1), $("$TLJH_USER/bin/python" -m pip --version | awk '{print "pip", $2}'), Python $py_after"
 sudo -EH "$TLJH_USER/bin/python" -m pip install -r "$BASE_REQS"
 
 # Settings for every user's Jupyter server, merged into
