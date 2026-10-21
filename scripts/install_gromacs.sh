@@ -185,7 +185,14 @@ if ! { command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null; }; then die "t
     sudo ubuntu-drivers install    # or: sudo apt-get install nvidia-open
 and reboot, then re-run."; fi
 nvidia-smi --query-gpu=name,driver_version,compute_cap --format=csv,noheader
-drv_cuda=$(nvidia-smi | grep -o 'CUDA Version: [0-9.]*' | awk '{print $3}')
+# The newest CUDA the driver supports, from nvidia-smi's header. Older
+# drivers (seen: R595) print "CUDA Version: 13.2"; newer ones (seen: R615)
+# print "CUDA UMD Version: 13.4". "|| true" because, with set -e and
+# pipefail, a format that matches neither would otherwise end the script
+# here with no explanation.
+drv_cuda=$(nvidia-smi | grep -oE 'CUDA (UMD )?Version: *[0-9]+(\.[0-9]+)*' | head -n1 \
+           | grep -oE '[0-9]+(\.[0-9]+)*$' || true)
+[[ -n "$drv_cuda" ]] || echo "warning: couldn't read the driver's CUDA version from nvidia-smi's header; skipping the driver/toolkit version check" >&2
 if [[ -n "$drv_cuda" ]]; then
     if [[ "${drv_cuda%%.*}" -lt "${CUDA_VERSION%%.*}" ]]; then
         die "the driver supports CUDA up to $drv_cuda, older than toolkit $CUDA_VERSION; update the NVIDIA driver"
@@ -204,7 +211,7 @@ warning: the driver supports CUDA $drv_cuda, older than toolkit $CUDA_VERSION.
   CUDA_ERROR_UNSUPPORTED_PTX_VERSION. Install a driver from the branch that
   matches the toolkit (CUDA 13.4 -> R615, 13.3 -> R610, 13.2 -> R595), e.g.
     sudo apt install nvidia-driver-615-open   # then reboot
-  and check that nvidia-smi shows "CUDA Version: $CUDA_VERSION" or later.
+  and check that nvidia-smi shows "CUDA (UMD) Version: $CUDA_VERSION" or later.
 WARN
     fi
 fi
