@@ -145,8 +145,12 @@ echo "---- $(date -Is) tljh-install-gromacs $*"
 
 # --- gmxapi --------------------------------------------------------------------------
 # Built from the matching GROMACS source rather than PyPI, whose gmxapi
-# release (0.4.2, 2023) predates this GROMACS. pip builds it with the system
-# compiler that built GROMACS.
+# release (0.4.2, 2023) predates this GROMACS. gmxapi's C++ code includes
+# <mpi.h> (even with thread-MPI GROMACS) and it needs mpi4py, so the env must
+# have an MPI: compchem_env.yaml lists openmpi and mpi4py (conda-forge). pip
+# builds with that env's mpicc/mpicxx wrappers, pointed at the system
+# compilers that built GROMACS (OMPI_CC/OMPI_CXX), with an rpath to the
+# env's lib so the module finds libmpi without an activated env.
 
 install_gmxapi() {
     [[ -n "$ENV_PREFIX" ]] || { info "gmxapi: skipped (GMXAPI_ENV is empty)"; return 0; }
@@ -155,6 +159,8 @@ install_gmxapi() {
     [[ -d "$SRC_DIR/python_packaging/gmxapi" ]] \
         || die "$SRC_DIR/python_packaging/gmxapi not found; run tljh-install-gromacs without --gmxapi-only"
     [[ -x "$PREFIX/bin/gmx" ]] || die "GROMACS $GMX_VERSION is not installed in $PREFIX"
+    [[ -x "$ENV_PREFIX/bin/mpicxx" && -f "$ENV_PREFIX/include/mpi.h" ]] \
+        || die "$ENV_PREFIX has no MPI (mpicxx, mpi.h), which gmxapi needs. Add openmpi and mpi4py to the env file (environments/compchem_env.yaml has them), update the env with tljh-install-kernel, then run: sudo tljh-install-gromacs --gmxapi-only"
     info "Building gmxapi into $ENV_PREFIX"
     # env -i: nothing from root's environment (conda, pip settings) leaks in,
     # except proxy and CA-certificate settings (kept by `sudo -E`).
@@ -164,7 +170,9 @@ install_gmxapi() {
         ${no_proxy:+"no_proxy=$no_proxy"} ${PIP_CERT:+"PIP_CERT=$PIP_CERT"} \
         ${SSL_CERT_FILE:+"SSL_CERT_FILE=$SSL_CERT_FILE"} \
         ${REQUESTS_CA_BUNDLE:+"REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"} \
-        CC=/usr/bin/gcc CXX=/usr/bin/g++ gmxapi_ROOT="$PREFIX" \
+        CC="$ENV_PREFIX/bin/mpicc" CXX="$ENV_PREFIX/bin/mpicxx" MPICC="$ENV_PREFIX/bin/mpicc" \
+        OMPI_CC=/usr/bin/gcc OMPI_CXX=/usr/bin/g++ \
+        LDFLAGS="-Wl,-rpath,$ENV_PREFIX/lib" gmxapi_ROOT="$PREFIX" \
         "$ENV_PREFIX/bin/python" -m pip install --no-cache-dir --upgrade \
         "$SRC_DIR/python_packaging/gmxapi"
     info "Checking gmxapi as an ordinary user"

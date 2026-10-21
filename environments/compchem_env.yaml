@@ -24,6 +24,11 @@ dependencies:
   # were pip-installed on the old server; both are on conda-forge
   - py3dmol
   - tabulate
+  # MPI for gmxapi (added by tljh-install-gromacs): its C++ code includes
+  # <mpi.h> and it imports mpi4py, even though this GROMACS uses thread-MPI.
+  # tljh-install-gromacs builds gmxapi with this env's mpicc/mpicxx.
+  - openmpi
+  - mpi4py
   - pip:
     # Marianski Lab toolkit (github.com/marianski-lab/matmalib); PyPI only.
     - matmalib>=0.2.6

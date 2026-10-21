@@ -294,7 +294,7 @@ Run any of them with `--help` for details.
 
 ## Software
 
-- **Course kernels:** `pchem2` ("Python (PChem Lab)", Python 3.14, psi4, nglview, ir_visuals_widget) and `compchem` ("Python (CompChem)", Python 3.13, matmalib, py3Dmol; gmxapi added by the GROMACS installer). The default Python kernel stays the TLJH environment.
+- **Course kernels:** `pchem2` ("Python (PChem Lab)", Python 3.14, psi4, nglview, ir_visuals_widget) and `compchem` ("Python (CompChem)", Python 3.13, matmalib, py3Dmol, Open MPI + mpi4py for gmxapi; gmxapi added by the GROMACS installer, built with the env's `mpicxx`). The default Python kernel stays the TLJH environment.
 - **Gaussian 16:** see [gaussian_setup_notes.md](gaussian_setup_notes.md). Every hub user can run `g16` from a terminal or notebook cell.
 - **GROMACS 2026.4:** built from source with CUDA by `tljh-install-gromacs`; version and options in `config/gromacs_build.conf` and `config/gromacs_cache.cmake`. `gmx` is on every user's PATH; mdrun counts all 64 logical CPUs, so users should run `gmx mdrun -ntmpi 1 -ntomp $OMP_NUM_THREADS`.
 - **Exports:** HTML, LaTeX, Markdown, Notebook, PDF (LaTeX), Python and WebPDF in "Save and Export Notebook As". Cells tagged `remove_cell`/`hide_cell`, `remove_input`/`hide_input` or `remove_output`/`hide_output` are left out of exports.
