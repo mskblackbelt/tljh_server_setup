@@ -23,7 +23,8 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #   * GROMACS (optional): the NVIDIA driver must already be installed and
 #     working (nvidia-smi); the CUDA toolkit is installed for you.
 #   * Network: the server needs outbound HTTPS to tljh.jupyter.org,
-#     github.com, pypi.org, conda.anaconda.org (conda-forge) and
+#     github.com (also where uv and ty are downloaded from), pypi.org,
+#     conda.anaconda.org (conda-forge) and
 #     cdn.playwright.dev (the headless Chromium for WebPDF export); for
 #     GROMACS also ftp.gromacs.org, www.fftw.org and
 #     developer.download.nvidia.com.
@@ -36,7 +37,8 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #   3. Installs TLJH with your chosen admin account(s), with sign-up and
 #      admin approval as the login method from the hub's first start.
 #   4. Installs the admin commands tljh-install-kernel, tljh-make-dropbox,
-#      tljh-install-gaussian and tljh-install-gromacs into /usr/local/sbin
+#      tljh-install-gaussian, tljh-install-gromacs and tljh-install-uv-ty
+#      into /usr/local/sbin
 #      (GROMACS build settings into /usr/local/etc/tljh), and lets
 #      instructors run tljh-make-dropbox.
 #   5. Creates /etc/skel-tljh and the /srv/shared folders.
@@ -48,11 +50,13 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 #      JupyterLab extensions and settings to it.
 #   9. Installs notebook templates (each folder in templates/).
 #  10. Builds each course's conda environment and registers it as a kernel.
-#  11. Optionally installs Gaussian 16 for every hub user (tljh-install-gaussian).
-#  12. Optionally builds GROMACS with GPU support (tljh-install-gromacs).
-#      A failure in step 11 or 12 does not stop the run: it is logged and
+#  11. Installs uv and ty for every user (tljh-install-uv-ty) and makes ty
+#      the Python language server in JupyterLab.
+#  12. Optionally installs Gaussian 16 for every hub user (tljh-install-gaussian).
+#  13. Optionally builds GROMACS with GPU support (tljh-install-gromacs).
+#      A failure in step 11, 12 or 13 does not stop the run: it is logged and
 #      listed in the notes at the end.
-#  13. Reloads the hub so every change takes effect.
+#  14. Reloads the hub so every change takes effect.
 #
 # To update just the admin commands or their settings after editing them,
 # repeat step 4's `install` lines by hand, or re-run this script.
@@ -152,7 +156,7 @@ BASE_REQS="$CENV_DIR/base_requirements.txt"
 [[ -f "$BASE_REQS" ]] || die "missing $BASE_REQS"
 [[ -f "$CONFIG_SRC/jupyter_config.py" ]] || die "missing $CONFIG_SRC/jupyter_config.py"
 
-# Gaussian 16 (step 11): optional; blank skips it. Re-run later on its own
+# Gaussian 16 (step 12): optional; blank skips it. Re-run later on its own
 # with: sudo tljh-install-gaussian <path>
 read -r -e -p "Path to the Gaussian 16 files on this server (folder or archive; blank to skip): " G16_SRC
 if [[ -n "$G16_SRC" ]]; then
@@ -165,6 +169,14 @@ if [[ -n "$G16_SRC" ]]; then
 fi
 [[ -f "$SCRIPT_DIR/install_gaussian.sh" ]] || die "missing $SCRIPT_DIR/install_gaussian.sh"
 
+# uv and ty (step 11): not optional, and no questions; the versions come from
+# the pins at the top of install_uv_ty.sh (change them there, or run
+# tljh-install-uv-ty --uv-version/--ty-version later).
+[[ -f "$SCRIPT_DIR/install_uv_ty.sh" ]] || die "missing $SCRIPT_DIR/install_uv_ty.sh"
+UV_VERSION=$(sed -n 's/^UV_VERSION=\([0-9.]*\).*/\1/p' "$SCRIPT_DIR/install_uv_ty.sh")
+TY_VERSION=$(sed -n 's/^TY_VERSION=\([0-9.]*\).*/\1/p' "$SCRIPT_DIR/install_uv_ty.sh")
+[[ -n "$UV_VERSION" && -n "$TY_VERSION" ]] || die "couldn't read the uv/ty versions from $SCRIPT_DIR/install_uv_ty.sh"
+
 # Hub config files (step 7). A Python error in one of them would stop the
 # hub from starting, so check their syntax now.
 HUB_CONFIG_FILES=("$HUB_CONFIG_SRC"/*.py)
@@ -174,7 +186,7 @@ for f in "${HUB_CONFIG_FILES[@]}"; do
         || die "syntax error in $f"
 done
 
-# GROMACS (step 12): optional. Version and build options are in
+# GROMACS (step 13): optional. Version and build options are in
 # config/gromacs_build.conf and config/gromacs_cache.cmake.
 for f in "$SCRIPT_DIR/install_gromacs.sh" "$CONFIG_SRC/gromacs_build.conf" "$CONFIG_SRC/gromacs_cache.cmake"; do
     [[ -f "$f" ]] || die "missing $f"
@@ -204,6 +216,7 @@ About to install TLJH with:
   course kernels : $(printf '%s; ' "${COURSE_KERNELS[@]}" | sed 's/|/ -> /g; s/; $//')
   base extras    : $BASE_REQS
   templates      : ${TEMPLATE_FOLDERS[*]:-(none found in $TEMPLATES_SRC)}
+  uv and ty      : uv $UV_VERSION, ty $TY_VERSION (ty becomes the JupyterLab language server)
   storage        : $SRV_DATASET -> /srv, $SCRATCH_DATASET -> /scratch (quota $SCRATCH_QUOTA, cleanup after $SCRATCH_MAX_AGE)
   Gaussian 16    : ${G16_SRC:-(skipped)}
   GROMACS        : $([[ $BUILD_GROMACS -eq 1 ]] && echo "$GMX_VERSION (CUDA)" || echo "(skipped)")
@@ -251,7 +264,7 @@ trap 'kill "$KEEPALIVE_PID" 2>/dev/null || true' EXIT
 # Compression: both datasets inherit lz4 from the pool; it is set on the
 # dataset only if compression is off.
 
-step "1/13 Storage: ZFS datasets for /srv and /scratch"
+step "1/14 Storage: ZFS datasets for /srv and /scratch"
 
 command -v zfs >/dev/null || die "ZFS tools not installed (sudo apt install zfsutils-linux); set up the pool first, see docs/server_setup.md"
 sudo zpool list -H -o name "$ZPOOL" >/dev/null 2>&1 \
@@ -363,7 +376,7 @@ fi
 # acl provides setfacl/getfacl, used by tljh-make-dropbox.
 # DEBIAN_FRONTEND=noninteractive keeps apt from stopping to ask questions.
 
-step "2/13 System packages"
+step "2/14 System packages"
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     curl git python3 python3-dev acl texlive-full
@@ -388,7 +401,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
 # Admin usernames are approved automatically when they sign up, so sign up
 # as each admin right after setup (see the notes at the end).
 
-step "3/13 Installing The Littlest JupyterHub"
+step "3/14 Installing The Littlest JupyterHub"
 TLJH_CONFIG=/opt/tljh/config/config.yaml
 if ! sudo test -e "$TLJH_CONFIG"; then
     sudo install -d -m 0755 -o root -g root /opt/tljh
@@ -502,17 +515,20 @@ fi
 #   tljh-install-gaussian  admins only: sudo tljh-install-gaussian <files>
 #   tljh-install-gromacs   admins only: sudo -E tljh-install-gromacs
 #                          (settings: /usr/local/etc/tljh/gromacs_build.conf)
+#   tljh-install-uv-ty     admins only: sudo tljh-install-uv-ty
+#                          (uv and ty for everyone; run again to upgrade)
 #
 # Hub accounts have no Linux password, so the instructors' sudo rule is
 # NOPASSWD and limited to that one command. The script itself refuses to
 # act on another instructor's folder when run by a non-admin.
 
-step "4/13 Admin commands"
+step "4/14 Admin commands"
 sudo groupadd -f "$INSTRUCTORS_GROUP"
 sudo install -m 0755 -o root -g root "$SCRIPT_DIR/install_kernel.sh" "$TOOLS_DIR/tljh-install-kernel"
 sudo install -m 0755 -o root -g root "$SCRIPT_DIR/make_dropbox.sh"   "$TOOLS_DIR/tljh-make-dropbox"
 sudo install -m 0755 -o root -g root "$SCRIPT_DIR/install_gaussian.sh" "$TOOLS_DIR/tljh-install-gaussian"
 sudo install -m 0755 -o root -g root "$SCRIPT_DIR/install_gromacs.sh"  "$TOOLS_DIR/tljh-install-gromacs"
+sudo install -m 0755 -o root -g root "$SCRIPT_DIR/install_uv_ty.sh"    "$TOOLS_DIR/tljh-install-uv-ty"
 sudo install -d -m 0755 -o root -g root "$TOOLS_ETC"
 sudo install -m 0644 -o root -g root "$CONFIG_SRC/gromacs_build.conf" "$CONFIG_SRC/gromacs_cache.cmake" "$TOOLS_ETC/"
 
@@ -526,7 +542,7 @@ EOF
 sudo visudo -cqf "$sudoers_tmp" || die "generated sudoers rule failed validation"
 sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/jupyterhub-instructors
 rm -f "$sudoers_tmp"
-echo "Installed tljh-install-kernel, tljh-make-dropbox, tljh-install-gaussian and tljh-install-gromacs in $TOOLS_DIR"
+echo "Installed tljh-install-kernel, tljh-make-dropbox, tljh-install-gaussian, tljh-install-gromacs and tljh-install-uv-ty in $TOOLS_DIR"
 
 # --- 5. Skeleton home folder and shared folders --------------------------------
 # /srv/shared/lab_data     instructors write, everyone reads (course data:
@@ -538,7 +554,7 @@ echo "Installed tljh-install-kernel, tljh-make-dropbox, tljh-install-gaussian an
 # Every new user gets a `shared` link to /srv/shared in their home folder.
 # /srv itself is the ZFS dataset made in step 1.
 
-step "5/13 Skeleton home folder and /srv/shared"
+step "5/14 Skeleton home folder and /srv/shared"
 [[ -d "$SKEL_DIR" ]] || sudo cp -a /etc/skel "$SKEL_DIR"
 sudo install -d -m 0755 -o root -g root "$SHARED_DIR"
 sudo install -d -m 2775 -o root -g "$INSTRUCTORS_GROUP" "$SHARED_DIR/lab_data"
@@ -550,7 +566,7 @@ sudo ln -sfn "$SHARED_DIR" "$SKEL_DIR/shared"
 # `useradd --create-home`. This adds `--skel /etc/skel-tljh` to that call.
 # NOTE: upgrading TLJH replaces this file. Re-run this script after upgrades.
 
-step "6/13 Patching TLJH user creation"
+step "6/14 Patching TLJH user creation"
 USER_PY=$(sudo find /opt/tljh/hub -path '*/site-packages/tljh/user.py' -print -quit)
 [[ -n "$USER_PY" ]] || die "could not find tljh/user.py under /opt/tljh/hub"
 if sudo grep -qF "\"--skel\", \"$SKEL_DIR\"" "$USER_PY"; then
@@ -574,7 +590,7 @@ fi
 # (TLJH's default is 10 minutes). Running kernels and unsaved variables are
 # lost; saved files are not.
 
-step "7/13 Resource limits, idle shutdown, scheduled jobs and hub config files"
+step "7/14 Resource limits, idle shutdown, scheduled jobs and hub config files"
 sudo tljh-config set limits.cpu 4
 sudo tljh-config set limits.memory 8G
 sudo tljh-config set services.cull.timeout 3600
@@ -614,7 +630,7 @@ echo "Installed $(printf '%s ' "${HUB_CONFIG_FILES[@]##*/}")into $HUB_CONFIG_DIR
 # ipywidgets into /opt/tljh/user with pip, and adding conda copies of the
 # same packages on top leaves duplicate, conflicting installs.
 
-step "8/13 JupyterLab extensions and settings (base environment)"
+step "8/14 JupyterLab extensions and settings (base environment)"
 # TLJH installs a fixed Miniforge (24.7.1: conda 24.7, mamba 1.x) and later
 # only upgrades conda/mamba/pip that are below very old minimums, so a new
 # server starts with an outdated conda ("A newer version of conda exists").
@@ -649,6 +665,8 @@ sudo -EH "$TLJH_USER/bin/python" -m pip install -r "$BASE_REQS"
 # only reads its own keys there (auth, users, limits, ...). And
 # jupyter_server_config.d/*.json is only read for enabling extensions.
 # Users get changes the next time their server starts.
+# Step 11 (tljh-install-uv-ty) adds the ty language server to this same file;
+# jupyterlab-lsp, its JupyterLab half, comes from base_requirements.txt above.
 server_cfg="$TLJH_USER/etc/jupyter/jupyter_server_config.json"
 sudo install -d -m 0755 "$(dirname "$server_cfg")"
 sudo "$TLJH_USER/bin/python" - "$server_cfg" <<'PY'
@@ -710,7 +728,7 @@ sudo chmod -R a+rX "$PLAYWRIGHT_DIR"
 # right away. Users can also keep personal templates in
 # ~/.local/share/jupyter/notebook_templates/<folder>/.
 
-step "9/13 Notebook templates"
+step "9/14 Notebook templates"
 TEMPLATES_DEST="$TLJH_USER/share/jupyter/notebook_templates"
 sudo install -d -m 0755 -o root -g root "$TEMPLATES_DEST"
 for f in "$TEMPLATES_SRC"/*; do
@@ -735,7 +753,7 @@ done
 # script) and registers it as a kernel for all users. Re-running updates
 # existing envs in place.
 
-step "10/13 Course environments and kernels"
+step "10/14 Course environments and kernels"
 for entry in "${COURSE_KERNELS[@]}"; do
     env_file="$CENV_DIR/${entry%%|*}"
     label="${entry#*|}"
@@ -743,9 +761,9 @@ for entry in "${COURSE_KERNELS[@]}"; do
     sudo -E "$TOOLS_DIR/tljh-install-kernel" -d "$label" "$env_file"
 done
 
-# --- Optional steps 11 and 12 must not stop the run ---------------------------------------
-# A failure in Gaussian or GROMACS is recorded, the rest of the setup carries
-# on (step 13 still reloads the hub), and the notes at the end list what
+# --- Steps 11 to 13 must not stop the run ---------------------------------------
+# A failure in uv/ty, Gaussian or GROMACS is recorded, the rest of the setup
+# carries on (step 14 still reloads the hub), and the notes at the end list what
 # failed. Failures go to $FAILURE_LOG as well as the terminal.
 
 NOTES_DIR=/var/log/tljh_server_setup
@@ -772,41 +790,54 @@ optional_step() {
     return 0
 }
 
-# --- 11. Gaussian 16 (optional) --------------------------------------------------------
+# --- 11. uv and ty ---------------------------------------------------------------------
+# tljh-install-uv-ty puts uv, uvx and ty in /usr/local/bin for every user
+# (downloaded from GitHub and checked against the SHA-256 file published with
+# each release), and adds ty to the JupyterLab server settings as the Python
+# language server (jupyterlab-lsp was installed in step 8). uv's environments,
+# cache and downloaded Pythons stay in each user's own home folder. See its
+# --help. Users get ty the next time their server starts; no hub reload needed.
+
+step "11/14 uv and ty"
+optional_step "uv and ty" \
+    "the installer's own error is printed above (a download from github.com is the usual cause); re-run it with: sudo tljh-install-uv-ty" \
+    sudo -E "$TOOLS_DIR/tljh-install-uv-ty"
+
+# --- 12. Gaussian 16 (optional) --------------------------------------------------------
 # tljh-install-gaussian installs the binaries in /opt/gaussian/g16 for the
 # jupyterhub-users group (every hub account), creates /scratch/g16, sets the
 # Gaussian environment for notebooks, JupyterLab terminals and SSH logins,
 # and runs Gaussian's test job 0 as an ordinary user. See its --help.
-# --no-reload: step 13 reloads the hub.
+# --no-reload: step 14 reloads the hub.
 
 if [[ -n "$G16_SRC" ]]; then
-    step "11/13 Gaussian 16"
+    step "12/14 Gaussian 16"
     optional_step "Gaussian 16" \
         "the installer's own error is printed above; a failed test job leaves its log in /tmp/g16test.*/" \
         sudo "$TOOLS_DIR/tljh-install-gaussian" --no-reload "$G16_SRC"
 else
-    step "11/13 Gaussian 16 (skipped)"
+    step "12/14 Gaussian 16 (skipped)"
 fi
 
-# --- 12. GROMACS (optional) --------------------------------------------------------------
+# --- 13. GROMACS (optional) --------------------------------------------------------------
 # tljh-install-gromacs builds GROMACS from source with CUDA (installing the
 # CUDA toolkit if needed), runs its tests, installs it in
 # /opt/gromacs/<version> (/opt/gromacs/current), puts `gmx` on every user's
 # PATH, and builds gmxapi into the compchem kernel (step 10 must come first).
-# --no-reload: step 13 reloads the hub.
+# --no-reload: step 14 reloads the hub.
 
 if [[ $BUILD_GROMACS -eq 1 ]]; then
-    step "12/13 GROMACS $GMX_VERSION"
+    step "13/14 GROMACS $GMX_VERSION"
     optional_step "GROMACS $GMX_VERSION" \
         "the installer's own error is printed above; a failed build or test keeps its folder in /var/tmp/tljh-gromacs-build/" \
         sudo -E "$TOOLS_DIR/tljh-install-gromacs" --no-reload
 else
-    step "12/13 GROMACS (skipped)"
+    step "13/14 GROMACS (skipped)"
 fi
 
-# --- 13. Apply changes -----------------------------------------------------------------
+# --- 14. Apply changes -----------------------------------------------------------------
 
-step "13/13 Reloading the hub and proxy"
+step "14/14 Reloading the hub and proxy"
 sudo tljh-config reload proxy
 sudo tljh-config reload hub
 
@@ -820,11 +851,13 @@ HUB_URL="http://$(hostname -f 2>/dev/null || hostname)"
 REPO_VERSION=$(git -C "$SCRIPT_DIR/.." describe --always --dirty 2>/dev/null || echo unknown)
 G16_INSTALLED=0; sudo test -x /opt/gaussian/g16/g16 && G16_INSTALLED=1
 GMX_INSTALLED=0; sudo test -x /opt/gromacs/current/bin/gmx && GMX_INSTALLED=1
+UVTY_INSTALLED=0; [[ -x /usr/local/bin/uv && -x /usr/local/bin/ty ]] && UVTY_INSTALLED=1
 # A failed Gaussian install can leave its files in place (the test job runs
 # last), so a recorded failure overrides the file check.
 for f in "${FAILED_STEPS[@]}"; do
     [[ $f == Gaussian* ]] && G16_INSTALLED=0
     [[ $f == GROMACS* ]] && GMX_INSTALLED=0
+    [[ $f == uv* ]] && UVTY_INSTALLED=0
 done
 CLOCK_SYNCED=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)
 
@@ -835,17 +868,18 @@ admin_notes() {
 Run on $(hostname) at $(date '+%Y-%m-%d %H:%M %Z') by ${USER:-$(id -un)} (repo version $REPO_VERSION).
   admin(s)       : ${ADMIN_USERS[*]}
   course kernels : $(printf '%s; ' "${COURSE_KERNELS[@]}" | sed 's/|/ -> /g; s/; $//')
+  uv and ty      : $([[ $UVTY_INSTALLED -eq 1 ]] && echo "uv $(/usr/local/bin/uv --version | awk '{print $2}'), ty $(/usr/local/bin/ty --version | awk '{print $2}') in /usr/local/bin" || echo "not installed")
   Gaussian 16    : $([[ $G16_INSTALLED -eq 1 ]] && echo "installed in /opt/gaussian" || echo "not installed")
   GROMACS        : $([[ $GMX_INSTALLED -eq 1 ]] && echo "installed, /opt/gromacs/current -> $(sudo readlink /opt/gromacs/current)" || echo "not installed")
 EOT
     if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
         cat <<EOT
 
-!!!! ATTENTION: these optional steps FAILED; everything else was installed !!!!
+!!!! ATTENTION: these steps FAILED; everything else was installed !!!!
 $(printf '  - %s\n' "${FAILED_STEPS[@]}")
 Details: $FAILURE_LOG (full output is in the terminal scrollback of this run).
 Fix the cause, then re-run only that installer (see "Admin commands" below):
-  sudo tljh-install-gaussian <files>        sudo -E tljh-install-gromacs
+  sudo tljh-install-uv-ty    sudo tljh-install-gaussian <files>    sudo -E tljh-install-gromacs
 A failed Gaussian install can leave non-working files in /opt/gaussian/g16;
 a previous install, if there was one, is in /opt/gaussian/g16.previous.
 EOT
@@ -904,7 +938,19 @@ Admin commands (run "<command> --help" for details):
   sudo tljh-install-gaussian <files>         install or replace Gaussian 16
   sudo -E tljh-install-gromacs               build/upgrade GROMACS (settings in
                                              $TOOLS_ETC/gromacs_build.conf)
+  sudo tljh-install-uv-ty                    install/upgrade uv and ty (pinned
+                                             versions; see --help)
 EOT
+    if [[ $UVTY_INSTALLED -eq 1 ]]; then
+        cat <<EOT
+
+uv, uvx and ty are on every user's PATH. ty is the Python language server in
+JupyterLab (diagnostics, completion, hover); a user gets it when their server
+next starts. It checks imports against the JupyterLab environment, not the
+notebook's kernel, so it can flag packages that only the course kernels have
+(docs/server_setup.md, "uv and ty", says how to handle that).
+EOT
+    fi
     if [[ $G16_INSTALLED -eq 1 ]]; then
         cat <<EOT
 

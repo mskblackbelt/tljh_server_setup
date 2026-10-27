@@ -35,7 +35,7 @@ cat /proc/cmdline                    # includes iommu=pt
 sudo dmesg | grep -i 'default domain'   # "Passthrough"
 ```
 
-Check peer-to-peer with NVIDIA's sample (needs the CUDA toolkit; `tljh-install-gromacs` installs it, or check again after step 12):
+Check peer-to-peer with NVIDIA's sample (needs the CUDA toolkit; `tljh-install-gromacs` installs it, or check again after step 13):
 
 ```bash
 git clone --depth 1 https://github.com/NVIDIA/cuda-samples.git ~/cuda-samples
@@ -226,14 +226,15 @@ It asks for the TLJH admin username(s), a hub password for each admin (typed wit
 | 8 | Updates conda, mamba and pip in `/opt/tljh/user` (TLJH's own Miniforge is from 2024), then JupyterLab extensions and settings (`environments/base_requirements.txt`, `config/jupyter_config.py`), WebPDF browser |
 | 9 | Notebook templates (each folder in `templates/`) |
 | 10 | Course kernels (`environments/*.yaml`, listed in `COURSE_KERNELS` at the top of the script) |
-| 11 | Gaussian 16 (optional), via `tljh-install-gaussian` |
-| 12 | GROMACS with CUDA (optional), via `tljh-install-gromacs` |
-| 13 | Reloads the proxy and hub |
+| 11 | uv and ty for every user, and ty as the JupyterLab language server, via `tljh-install-uv-ty` (see [uv and ty](#uv-and-ty)) |
+| 12 | Gaussian 16 (optional), via `tljh-install-gaussian` |
+| 13 | GROMACS with CUDA (optional), via `tljh-install-gromacs` |
+| 14 | Reloads the proxy and hub |
 
 ### While it runs
 
 - **Run it inside `tmux` or `screen`.** It takes an hour or more, and a dropped SSH connection would kill it partway through (`tmux new -s setup`; reattach with `tmux attach -t setup`).
-- **Consider answering "N" to GROMACS on the first run.** It's the least-tested part (CUDA 13, NVIDIA's repository address, gmxapi), and its build and tests take a while. A failure in step 11 or 12 no longer stops the run: it's logged in `/var/log/tljh_server_setup/failures-<timestamp>.log` and listed at the top of the final notes. Build it afterwards on its own with `sudo -E tljh-install-gromacs`. The same applies to Gaussian (`sudo tljh-install-gaussian <files>`) if you want to be extra careful, although its installer checks itself with a test job.
+- **Consider answering "N" to GROMACS on the first run.** It's the least-tested part (CUDA 13, NVIDIA's repository address, gmxapi), and its build and tests take a while. A failure in step 11, 12 or 13 no longer stops the run: it's logged in `/var/log/tljh_server_setup/failures-<timestamp>.log` and listed at the top of the final notes. Build it afterwards on its own with `sudo -E tljh-install-gromacs`. The same applies to Gaussian (`sudo tljh-install-gaussian <files>`) if you want to be extra careful, although its installer checks itself with a test job.
 - **If something fails,** fix it and re-run the script. It's safe to re-run, but it repeats the long steps, and step 3 also upgrades TLJH.
 
 ### After it finishes
@@ -255,6 +256,7 @@ It asks for the TLJH admin username(s), a hub password for each admin (typed wit
 | `/srv/shared/lab_data` | Course data: instructors write, everyone reads | |
 | `/srv/shared/submissions` | Drop boxes, one per instructor/course | |
 | `/usr/local/sbin/tljh-*` | Admin commands | `scripts/*.sh` |
+| `/usr/local/bin/uv`, `uvx`, `ty` | uv and ty, for every user | `scripts/install_uv_ty.sh` (versions pinned at its top) |
 | `/usr/local/etc/tljh/` | GROMACS build settings | `config/gromacs_build.conf`, `config/gromacs_cache.cmake` |
 | `/opt/gaussian/g16`, `/scratch/g16` | Gaussian 16 and its scratch | |
 | `/opt/gromacs/<version>`, `/opt/gromacs/current` | GROMACS | |
@@ -268,6 +270,7 @@ Run any of them with `--help` for details.
 | `sudo -E tljh-install-kernel [-d "<label>"] <env-file>` | admins | Add or update a course kernel (`-r` rebuilds from scratch, `--remove <name>` deletes) |
 | `sudo tljh-make-dropbox <folder> <instructor>` | admins; instructors for their own folders | Create or repair a submission drop box |
 | `sudo tljh-install-gaussian <files>` | admins | Install or replace Gaussian 16 |
+| `sudo -E tljh-install-uv-ty [--uv-version V] [--ty-version V]` | admins | Install or upgrade uv and ty (pinned versions, or `latest`); `--no-lsp` leaves JupyterLab alone |
 | `sudo -E tljh-install-gromacs` | admins | Build or upgrade GROMACS (`--gmxapi-only` re-adds the Python API to the compchem kernel; `--allow-iommu` builds without IOMMU passthrough, see section 1) |
 
 **sudo-rs note.** Ubuntu's default `sudo` is now sudo-rs. It ignores `-E` (printing "preserving the entire environment is not supported, '-E' is ignored") and rejects TLJH's `Defaults exempt_group = jupyterhub-admins` line. Step 3 removes that line and installs `/etc/sudoers.d/jupyterhub-admins-path` (`Defaults:%jupyterhub-admins !secure_path`), so hub admins keep their own `PATH` under sudo and `sudo -E pip install ...` in a hub terminal still uses `/opt/tljh/user/bin/pip`. Other users keep `secure_path`. TLJH rewrites its sudoers file on every install or upgrade, so re-run the setup script after upgrading TLJH. To pass a specific variable through, use `sudo --preserve-env=VAR,...`.
@@ -297,7 +300,32 @@ Run any of them with `--help` for details.
 - **Course kernels:** `pchem2` ("Python (PChem Lab)", Python 3.14, psi4, nglview, ir_visuals_widget) and `compchem` ("Python (CompChem)", Python 3.13, matmalib, py3Dmol, Open MPI + mpi4py for gmxapi; gmxapi added by the GROMACS installer, built with the env's `mpicxx`). The default Python kernel stays the TLJH environment.
 - **Gaussian 16:** see [gaussian_setup_notes.md](gaussian_setup_notes.md). Every hub user can run `g16` from a terminal or notebook cell.
 - **GROMACS 2026.4:** built from source with CUDA by `tljh-install-gromacs`; version and options in `config/gromacs_build.conf` and `config/gromacs_cache.cmake`. `gmx` is on every user's PATH; mdrun counts all 64 logical CPUs, so users should run `gmx mdrun -ntmpi 1 -ntomp $OMP_NUM_THREADS`.
+- **uv and ty:** `uv`, `uvx` and `ty` are on every user's PATH, and ty is the Python language server in JupyterLab (details [below](#uv-and-ty)).
 - **Exports:** HTML, LaTeX, Markdown, Notebook, PDF (LaTeX), Python and WebPDF in "Save and Export Notebook As". Cells tagged `remove_cell`/`hide_cell`, `remove_input`/`hide_input` or `remove_output`/`hide_output` are left out of exports.
+
+### uv and ty
+
+`tljh-install-uv-ty` (setup step 11) downloads the uv and ty release archives from github.com, checks each against the SHA-256 file published beside it, and installs `uv`, `uvx` and `ty` in `/usr/local/bin`. The versions are pinned at the top of `scripts/install_uv_ty.sh` (uv 0.13.5, ty 0.0.92 at the time of writing). ty is pre-1.0 and changes quickly, so read its release notes before moving the pin. To upgrade, edit the pins and re-run the setup or the command, or run `sudo -E tljh-install-uv-ty --uv-version <V> --ty-version <V>` (a version can be `latest`).
+
+- **Environments stay per user.** Everything uv creates is in the user's own home folder and counts against the home quota: project `.venv` folders, the package cache (`~/.cache/uv`), Pythons that uv downloads (`~/.local/share/uv/python`) and `uv tool install` programs (`~/.local/share/uv/tools`, linked from `~/.local/bin`). The cache can get large; `uv cache prune` or `uv cache clean` shrinks it. Nothing is shared except the programs.
+- **`uv self update` does not work** for these copies (users cannot write `/usr/local/bin`). Update by re-running the installer.
+- **ty in JupyterLab.** The JupyterLab half (`jupyterlab-lsp`) comes from `environments/base_requirements.txt` (step 8); the installer adds a `LanguageServerManager.language_servers` entry for `/usr/local/bin/ty server` to `/opt/tljh/user/etc/jupyter/jupyter_server_config.json`, next to the settings step 8 writes. Users get it when their server next starts. Opening a Python file or a notebook starts one `ty server` in that user's server, and the status bar reads "Fully initialized". It gives diagnostics, completion, hover and go to definition; it does not format (use Ruff for that). `requires_documents_on_disk` is false so JupyterLab does not litter home folders with `.virtual_documents`.
+- **ty only sees the JupyterLab environment's packages.** ty looks for installed packages in the Python environment of the JupyterLab server itself (`/opt/tljh/user`), not in the kernel a notebook uses, so `import rdkit` (or anything that only a course kernel has) is underlined as `unresolved-import` and gets no completion. The standard library and anything in `/opt/tljh/user` are fine. If that is too noisy, put a `ty.toml` in the folder JupyterLab starts in (the user's home folder), because ty treats that folder as its project root. Either point it at a kernel's environment (right when most work uses one kernel):
+
+  ```toml
+  [environment]
+  python = "/opt/tljh/user/envs/pchem2"
+  ```
+
+  or silence the rule:
+
+  ```toml
+  [rules]
+  unresolved-import = "ignore"
+  ```
+
+  A `ty.toml` in `/etc/skel-tljh` would give new users either setting; this is not done yet because it is a teaching choice (noise versus hiding real import mistakes). ty's documentation says it uses a `.venv` in its project root when nothing else is set, so a `.venv` directly in the home folder needs no setting (not tested here).
+- **Network.** The installer needs github.com. Users running `uv pip install` or `uv add` need pypi.org (or a mirror) from their servers, and `uv python install` needs whatever host uv downloads Pythons from.
 
 ## Testing
 
@@ -326,6 +354,13 @@ None of this has been run on the new server yet. Work through these after the fi
 
 - [ ] *(student, not in `gpu`)* `ls /dev/nvidia*` finds nothing, and the JupyterLab terminal still works.
 - [ ] Add the test user to `gpu`, restart their server: `nvidia-smi` works.
+
+### uv, ty and the language server
+
+- [ ] *(student)* In a hub terminal, `uv --version`, `uvx --version` and `ty --version` work.
+- [ ] *(student)* In a scratch folder: `uv venv && uv pip install requests` creates `.venv` in that folder, and the uv cache appears under that user's own `~/.cache/uv`.
+- [ ] *(student, after restarting the server)* Open a `.py` file and a notebook: the status bar says "Fully initialized" for the language server, and a deliberate error (`x: int = "a"`) is underlined. No `.virtual_documents` folder appears in the home folder.
+- [ ] `uv self update` fails with a clear message (expected); upgrading is done by the admin.
 
 ### Kernels, widgets and exports
 

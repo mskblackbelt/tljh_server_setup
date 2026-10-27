@@ -33,6 +33,13 @@ jupyterlab-git>=0.51,<1          # Git panel in the sidebar
 jupyterlab-spellchecker>=0.8,<1  # spell-checks Markdown cells and text files
 nbdime>=4.0,<5                   # notebook diffs/merges (used by the Git panel)
 
+# Code intelligence in the editor (diagnostics, completion, hover, go to
+# definition): jupyterlab-lsp is the JupyterLab half, jupyter-lsp the server
+# half. They only provide the plumbing; the language server itself is ty,
+# installed and registered by tljh-install-uv-ty (setup step 11).
+jupyterlab-lsp>=5.3,<6
+jupyter-lsp>=2.3,<3
+
 # PDF export via the HTML view ("WebPDF"), no LaTeX needed. Pulls in
 # Playwright; the setup script also installs the headless Chromium it drives
 # (step 7). If Playwright is upgraded later, re-run that step so the browser

@@ -2,7 +2,7 @@
 
 This repository contains the setup scripts and files for creating a bare metal installation of [The Littlest JupyterHub](https://tljh.jupyter.org/) along with templates and Conda environments designed for use in the physical chemistry lab at Hunter College. The lab guides for that course [are also available](https://github.com/mskblackbelt/Chem357).
 
-The server serves undergraduate lab courses (PChem, CompChem) and light research work, with per-user limits, course kernels, Gaussian 16 and GROMACS (GPU).
+The server serves undergraduate lab courses (PChem, CompChem) and light research work, with per-user limits, course kernels, Gaussian 16, GROMACS (GPU), and uv and ty (ty as the JupyterLab language server).
 
 ## Documentation
 
@@ -23,7 +23,7 @@ bash scripts/tljh_server_setup.sh
 
 | Folder | Contents |
 | --- | --- |
-| `scripts/` | `tljh_server_setup.sh` and the admin commands it installs (`tljh-install-kernel`, `tljh-make-dropbox`, `tljh-install-gaussian`, `tljh-install-gromacs`) |
+| `scripts/` | `tljh_server_setup.sh` and the admin commands it installs (`tljh-install-kernel`, `tljh-make-dropbox`, `tljh-install-gaussian`, `tljh-install-gromacs`, `tljh-install-uv-ty`) |
 | `config/` | Jupyter export settings (`jupyter_config.py`), hub settings (`jupyterhub_config.d/`), GROMACS build settings |
 | `environments/` | Packages for the JupyterLab environment (`base_requirements.txt`) and the course kernels (`*_env.yaml`) |
 | `templates/` | Notebook and LaTeX report templates, one folder per course |
